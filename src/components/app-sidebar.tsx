@@ -11,7 +11,7 @@ import {
   SidebarHeader,
   SidebarRail,
 } from "@/components/ui/sidebar"
-import { TerminalSquareIcon, BotIcon, BookOpenIcon, Settings2Icon, BarChart3Icon } from "lucide-react"
+import { TerminalSquareIcon, BotIcon, BarChart3Icon } from "lucide-react"
 
 // This is sample data.
 const data = {
@@ -22,8 +22,8 @@ const data = {
   },
   navMain: [
     {
-      title: "Playground",
-      url: "#",
+      title: "Input Data",
+      url: "/dashboard/input-data/matches",
       icon: (
         <TerminalSquareIcon
         />
@@ -31,90 +31,34 @@ const data = {
       isActive: true,
       items: [
         {
-          title: "History",
-          url: "#",
+          title: "Matches",
+          url: "/dashboard/input-data/matches",
         },
         {
-          title: "Starred",
-          url: "#",
-        },
-        {
-          title: "Settings",
-          url: "#",
+          title: "Bets",
+          url: "/dashboard/input-data/bets",
         },
       ],
     },
     {
-      title: "Models",
-      url: "#",
+      title: "Analytics",
+      url: "/dashboard/analytics/graphs",
       icon: (
         <BotIcon
         />
       ),
       items: [
         {
-          title: "Genesis",
-          url: "#",
+          title: "Graphs",
+          url: "/dashboard/analytics/graphs",
         },
         {
-          title: "Explorer",
-          url: "#",
+          title: "Tables",
+          url: "/dashboard/analytics/tables",
         },
         {
-          title: "Quantum",
-          url: "#",
-        },
-      ],
-    },
-    {
-      title: "Documentation",
-      url: "#",
-      icon: (
-        <BookOpenIcon
-        />
-      ),
-      items: [
-        {
-          title: "Introduction",
-          url: "#",
-        },
-        {
-          title: "Get Started",
-          url: "#",
-        },
-        {
-          title: "Tutorials",
-          url: "#",
-        },
-        {
-          title: "Changelog",
-          url: "#",
-        },
-      ],
-    },
-    {
-      title: "Settings",
-      url: "#",
-      icon: (
-        <Settings2Icon
-        />
-      ),
-      items: [
-        {
-          title: "General",
-          url: "#",
-        },
-        {
-          title: "Team",
-          url: "#",
-        },
-        {
-          title: "Billing",
-          url: "#",
-        },
-        {
-          title: "Limits",
-          url: "#",
+          title: "Totals",
+          url: "/dashboard/analytics/totals",
         },
       ],
     },
