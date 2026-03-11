@@ -65,7 +65,9 @@ import {
   CalendarIcon,
   PencilIcon,
   Settings2Icon,
+  XIcon,
 } from "lucide-react";
+import type { DateRange } from "react-day-picker";
 
 type MatchRow = {
   id: string;
@@ -104,6 +106,9 @@ export function MatchOddsFormTable() {
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [openActionId, setOpenActionId] = useState<string | null>(null);
+  const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
+  const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
+  const [filterMode, setFilterMode] = useState<"date" | "range">("date");
 
   const matchesCollection = useMemo(() => {
     if (!db || !uid) {
@@ -260,6 +265,72 @@ export function MatchOddsFormTable() {
     const day = `${date.getDate()}`.padStart(2, "0");
     return `${year}-${month}-${day}`;
   }
+
+  function parseStoredDate(value: string) {
+    if (!value) {
+      return null;
+    }
+
+    const parts = value.split("-");
+    if (parts.length === 3) {
+      const year = Number(parts[0]);
+      const month = Number(parts[1]);
+      const day = Number(parts[2]);
+      if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+        const parsed = new Date(year, month - 1, day);
+        if (!Number.isNaN(parsed.getTime())) {
+          return parsed;
+        }
+      }
+    }
+
+    const fallback = new Date(value);
+    return Number.isNaN(fallback.getTime()) ? null : fallback;
+  }
+
+  function startOfDay(value: Date) {
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  function endOfDay(value: Date) {
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate(), 23, 59, 59, 999);
+  }
+
+  const dateFilteredRows = useMemo(() => {
+    if (filterMode === "date" && !filterDate) {
+      return rows;
+    }
+
+    if (filterMode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
+      return rows;
+    }
+
+    return rows.filter((row) => {
+      const rowDate = parseStoredDate(row.date);
+      if (!rowDate) {
+        return false;
+      }
+
+      if (filterMode === "range" && (filterDateRange?.from || filterDateRange?.to)) {
+        const from = filterDateRange?.from ? startOfDay(filterDateRange.from) : null;
+        const to = filterDateRange?.to ? endOfDay(filterDateRange.to) : from;
+        if (from && rowDate < from) {
+          return false;
+        }
+        if (to && rowDate > to) {
+          return false;
+        }
+        return true;
+      }
+
+      if (filterMode === "date" && filterDate) {
+        const target = formatDateForInput(filterDate);
+        return row.date === target;
+      }
+
+      return true;
+    });
+  }, [filterDate, filterDateRange, filterMode, rows]);
 
   function renderSortIcon(sortState: false | "asc" | "desc") {
     if (sortState === "asc") {
@@ -444,7 +515,7 @@ export function MatchOddsFormTable() {
   ];
 
   const table = useReactTable({
-    data: rows,
+    data: dateFilteredRows,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -676,6 +747,103 @@ export function MatchOddsFormTable() {
           <CardTitle>Match Data Table</CardTitle>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 flex flex-wrap items-end gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Filter Mode</Label>
+              <div className="inline-flex rounded-md border p-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={filterMode === "date" ? "default" : "ghost"}
+                  onClick={() => setFilterMode("date")}
+                >
+                  Date
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={filterMode === "range" ? "default" : "ghost"}
+                  onClick={() => setFilterMode("range")}
+                >
+                  Range
+                </Button>
+              </div>
+            </div>
+            {filterMode === "date" ? (
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Date</Label>
+                <Popover>
+                  <PopoverTrigger
+                    render={
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={cn(
+                          "w-[180px] justify-start font-normal",
+                          !filterDate && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIcon className="size-4" />
+                        {filterDate
+                          ? formatDateDisplay(formatDateForInput(filterDate))
+                          : "Pick date"}
+                      </Button>
+                    }
+                  />
+                  <PopoverContent align="start" className="w-auto p-0">
+                    <Calendar mode="single" selected={filterDate} onSelect={(date) => setFilterDate(date ?? undefined)} />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Date Range</Label>
+                <Popover>
+                  <PopoverTrigger
+                    render={
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={cn(
+                          "w-[260px] justify-start font-normal",
+                          !filterDateRange?.from && !filterDateRange?.to && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIcon className="size-4" />
+                        {filterDateRange?.from
+                          ? filterDateRange.to
+                            ? `${formatDateDisplay(
+                                formatDateForInput(filterDateRange.from)
+                              )} - ${formatDateDisplay(formatDateForInput(filterDateRange.to))}`
+                            : formatDateDisplay(formatDateForInput(filterDateRange.from))
+                          : "Pick date range"}
+                      </Button>
+                    }
+                  />
+                  <PopoverContent align="start" className="w-auto p-0">
+                    <Calendar
+                      mode="range"
+                      selected={filterDateRange}
+                      onSelect={(range) => setFilterDateRange(range)}
+                      numberOfMonths={2}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              onClick={() => {
+                setFilterDate(undefined);
+                setFilterDateRange(undefined);
+              }}
+            >
+              <XIcon className="size-4" />
+              <span className="sr-only">Clear date filters</span>
+            </Button>
+          </div>
           <div className="mb-4 flex items-center justify-between gap-2">
             <Input
               placeholder="Filter rows..."

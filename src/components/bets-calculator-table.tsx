@@ -3,12 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { CalendarIcon, XIcon } from "lucide-react";
+import type { DateRange } from "react-day-picker";
 
 import { auth, db, isFirebaseConfigured } from "@/lib/firebase";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -49,6 +54,9 @@ export function BetsCalculatorTable() {
   const [rowStakes, setRowStakes] = useState<Record<string, string>>({});
   const [accumulatorStake, setAccumulatorStake] = useState("10");
   const [accumulatorIds, setAccumulatorIds] = useState<string[]>([]);
+  const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
+  const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
+  const [filterMode, setFilterMode] = useState<"date" | "range">("date");
 
   const accumulatorStakeValue = Number(accumulatorStake) || 0;
 
@@ -105,13 +113,86 @@ export function BetsCalculatorTable() {
     return Number(rowStakes[rowId] ?? defaultStake) || 0;
   }
 
+  function formatDateForInput(date: Date) {
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, "0");
+    const day = `${date.getDate()}`.padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function parseStoredDate(value: string) {
+    if (!value) {
+      return null;
+    }
+
+    const parts = value.split("-");
+    if (parts.length === 3) {
+      const year = Number(parts[0]);
+      const month = Number(parts[1]);
+      const day = Number(parts[2]);
+      if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+        const parsed = new Date(year, month - 1, day);
+        if (!Number.isNaN(parsed.getTime())) {
+          return parsed;
+        }
+      }
+    }
+
+    const fallback = new Date(value);
+    return Number.isNaN(fallback.getTime()) ? null : fallback;
+  }
+
+  function startOfDay(value: Date) {
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  function endOfDay(value: Date) {
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate(), 23, 59, 59, 999);
+  }
+
   function toggleAccumulator(rowId: string) {
     setAccumulatorIds((prev) =>
       prev.includes(rowId) ? prev.filter((id) => id !== rowId) : [...prev, rowId]
     );
   }
 
-  const accumulatorRows = rows.filter((row) => accumulatorIds.includes(row.id));
+  const filteredRows = useMemo(() => {
+    if (filterMode === "date" && !filterDate) {
+      return rows;
+    }
+
+    if (filterMode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
+      return rows;
+    }
+
+    return rows.filter((row) => {
+      const rowDate = parseStoredDate(row.date);
+      if (!rowDate) {
+        return false;
+      }
+
+      if (filterMode === "range" && (filterDateRange?.from || filterDateRange?.to)) {
+        const from = filterDateRange?.from ? startOfDay(filterDateRange.from) : null;
+        const to = filterDateRange?.to ? endOfDay(filterDateRange.to) : from;
+        if (from && rowDate < from) {
+          return false;
+        }
+        if (to && rowDate > to) {
+          return false;
+        }
+        return true;
+      }
+
+      if (filterMode === "date" && filterDate) {
+        const target = formatDateForInput(filterDate);
+        return row.date === target;
+      }
+
+      return true;
+    });
+  }, [filterDate, filterDateRange, filterMode, rows]);
+
+  const accumulatorRows = filteredRows.filter((row) => accumulatorIds.includes(row.id));
   const combinedOdds = accumulatorRows.reduce((total, row) => {
     const parsed = Number(row.odds);
     if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -129,6 +210,103 @@ export function BetsCalculatorTable() {
         <CardTitle>Bets</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Filter Mode</Label>
+            <div className="inline-flex rounded-md border p-1">
+              <Button
+                type="button"
+                size="sm"
+                variant={filterMode === "date" ? "default" : "ghost"}
+                onClick={() => setFilterMode("date")}
+              >
+                Date
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={filterMode === "range" ? "default" : "ghost"}
+                onClick={() => setFilterMode("range")}
+              >
+                Range
+              </Button>
+            </div>
+          </div>
+          {filterMode === "date" ? (
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Date</Label>
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={cn(
+                        "w-[180px] justify-start font-normal",
+                        !filterDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="size-4" />
+                      {filterDate
+                        ? formatDateDisplay(formatDateForInput(filterDate))
+                        : "Pick date"}
+                    </Button>
+                  }
+                />
+                <PopoverContent align="start" className="w-auto p-0">
+                  <Calendar mode="single" selected={filterDate} onSelect={(date) => setFilterDate(date ?? undefined)} />
+                </PopoverContent>
+              </Popover>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Date Range</Label>
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={cn(
+                        "w-[260px] justify-start font-normal",
+                        !filterDateRange?.from && !filterDateRange?.to && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="size-4" />
+                      {filterDateRange?.from
+                        ? filterDateRange.to
+                          ? `${formatDateDisplay(
+                              formatDateForInput(filterDateRange.from)
+                            )} - ${formatDateDisplay(formatDateForInput(filterDateRange.to))}`
+                          : formatDateDisplay(formatDateForInput(filterDateRange.from))
+                        : "Pick date range"}
+                    </Button>
+                  }
+                />
+                <PopoverContent align="start" className="w-auto p-0">
+                  <Calendar
+                    mode="range"
+                    selected={filterDateRange}
+                    onSelect={(range) => setFilterDateRange(range)}
+                    numberOfMonths={2}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            onClick={() => {
+              setFilterDate(undefined);
+              setFilterDateRange(undefined);
+            }}
+          >
+            <XIcon className="size-4" />
+            <span className="sr-only">Clear date filters</span>
+          </Button>
+        </div>
         <div className="max-w-xs space-y-2">
           <Label htmlFor="defaultStake">Default Stake</Label>
           <Input
@@ -161,14 +339,14 @@ export function BetsCalculatorTable() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.length === 0 ? (
+            {filteredRows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="py-4 text-muted-foreground">
                   No fixtures yet. Add rows in Matches first.
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((row) => {
+              filteredRows.map((row) => {
                 const oddsValue = Number(row.odds) || 0;
                 const stakeValue = getRowStake(row.id);
                 const potentialReturn = stakeValue * oddsValue;
