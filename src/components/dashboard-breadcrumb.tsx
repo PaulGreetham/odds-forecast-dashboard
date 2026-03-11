@@ -13,6 +13,10 @@ import {
 } from "@/components/ui/breadcrumb";
 
 function formatSegment(segment: string) {
+  if (segment === "graphs") {
+    return "Metrics";
+  }
+
   return segment
     .split("-")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))

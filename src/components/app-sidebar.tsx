@@ -53,7 +53,7 @@ const data = {
       ),
       items: [
         {
-          title: "Graphs",
+          title: "Metrics",
           url: "/dashboard/analytics/graphs",
         },
         {

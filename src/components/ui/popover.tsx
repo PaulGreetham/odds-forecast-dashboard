@@ -19,11 +19,12 @@ function PopoverContent({
   alignOffset = 0,
   side = "bottom",
   sideOffset = 4,
+  positionMethod = "fixed",
   ...props
 }: PopoverPrimitive.Popup.Props &
   Pick<
     PopoverPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset"
+    "align" | "alignOffset" | "side" | "sideOffset" | "positionMethod"
   >) {
   return (
     <PopoverPrimitive.Portal>
@@ -32,7 +33,11 @@ function PopoverContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
-        className="isolate z-50"
+        positionMethod={positionMethod}
+        className={cn(
+          "isolate z-50",
+          positionMethod === "fixed" ? "fixed" : "absolute"
+        )}
       >
         <PopoverPrimitive.Popup
           data-slot="popover-content"
