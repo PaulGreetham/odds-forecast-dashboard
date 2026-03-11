@@ -38,6 +38,10 @@ const data = {
           title: "Bets",
           url: "/dashboard/input-data/bets",
         },
+        {
+          title: "Results",
+          url: "/dashboard/input-data/results",
+        },
       ],
     },
     {
