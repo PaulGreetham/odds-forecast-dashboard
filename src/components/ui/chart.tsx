@@ -23,12 +23,14 @@ function useChart() {
 }
 
 function getChartColorVars(config: ChartConfig) {
+  type CSSVarStyle = React.CSSProperties & Record<`--${string}`, string>;
+
   return Object.entries(config).reduce((vars, [key, value]) => {
     if (value.color) {
-      vars[`--color-${key}` as keyof React.CSSProperties] = value.color;
+      vars[`--color-${key}` as `--${string}`] = value.color;
     }
     return vars;
-  }, {} as React.CSSProperties);
+  }, {} as CSSVarStyle);
 }
 
 export function ChartContainer({
@@ -61,6 +63,30 @@ export function ChartContainer({
 
 export const ChartTooltip = RechartsPrimitive.Tooltip;
 
+type TooltipItem = {
+  dataKey?: string | number;
+  name?: string;
+  color?: string;
+  value?: number | string;
+  payload?: unknown;
+};
+
+type ChartTooltipContentProps = {
+  active?: boolean;
+  payload?: TooltipItem[];
+  className?: string;
+  hideLabel?: boolean;
+  label?: string | number;
+  labelFormatter?: (label: string | number | undefined, payload: TooltipItem[]) => React.ReactNode;
+  formatter?: (
+    value: number | string | undefined,
+    name: string | undefined,
+    item: TooltipItem,
+    payload: TooltipItem[],
+    rawPayload: unknown
+  ) => React.ReactNode;
+};
+
 export function ChartTooltipContent({
   active,
   payload,
@@ -69,9 +95,7 @@ export function ChartTooltipContent({
   label,
   labelFormatter,
   formatter,
-}: RechartsPrimitive.TooltipProps<number, string> & {
-  hideLabel?: boolean;
-}) {
+}: ChartTooltipContentProps) {
   const { config } = useChart();
 
   if (!active || !payload?.length) {
