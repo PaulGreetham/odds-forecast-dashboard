@@ -67,6 +67,7 @@ export function MatchResultsTable() {
   const [rows, setRows] = useState<MatchResultRow[]>([]);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [listenerError, setListenerError] = useState<string | null>(null);
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
   const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
   const [filterMode, setFilterMode] = useState<"date" | "range">("date");
@@ -96,24 +97,31 @@ export function MatchResultsTable() {
     }
 
     const matchesQuery = query(matchesCollection, orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(matchesQuery, (snapshot) => {
-      const nextRows: MatchResultRow[] = snapshot.docs.map((item) => {
-        const data = item.data();
-        return {
-          id: item.id,
-          date: String(data.date ?? ""),
-          homeTeam: String(data.homeTeam ?? ""),
-          awayTeam: String(data.awayTeam ?? ""),
-          winnerSide: data.winnerSide === "away" ? "away" : "home",
-          actualWinnerSide:
-            data.actualWinnerSide === "home" || data.actualWinnerSide === "away"
-              ? data.actualWinnerSide
-              : null,
-        };
-      });
+    const unsubscribe = onSnapshot(
+      matchesQuery,
+      (snapshot) => {
+        const nextRows: MatchResultRow[] = snapshot.docs.map((item) => {
+          const data = item.data();
+          return {
+            id: item.id,
+            date: String(data.date ?? ""),
+            homeTeam: String(data.homeTeam ?? ""),
+            awayTeam: String(data.awayTeam ?? ""),
+            winnerSide: data.winnerSide === "away" ? "away" : "home",
+            actualWinnerSide:
+              data.actualWinnerSide === "home" || data.actualWinnerSide === "away"
+                ? data.actualWinnerSide
+                : null,
+          };
+        });
 
-      setRows(nextRows);
-    });
+        setRows(nextRows);
+        setListenerError(null);
+      },
+      () => {
+        setListenerError("Results could not be loaded due to Firestore permissions.");
+      }
+    );
 
     return () => unsubscribe();
   }, [matchesCollection]);
@@ -507,6 +515,7 @@ export function MatchResultsTable() {
         {!isFirebaseConfigured ? (
           <p className="text-sm text-muted-foreground">Firebase is not configured.</p>
         ) : null}
+        {listenerError ? <p className="text-sm text-destructive">{listenerError}</p> : null}
 
         <Table className="table-fixed">
           <TableHeader>

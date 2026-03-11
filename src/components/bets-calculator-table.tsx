@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import {
+  collection,
+  doc as firestoreDoc,
+  onSnapshot,
+  orderBy,
+  query,
+  setDoc,
+} from "firebase/firestore";
 import { CalendarIcon, XIcon } from "lucide-react";
 import type { DateRange } from "react-day-picker";
 
@@ -40,6 +47,14 @@ type DailyAccumulator = {
   day: string | null;
 };
 
+const initialAccumulator: DailyAccumulator = {
+  id: "acc-1",
+  name: "Accumulator 1",
+  stake: "10",
+  matchIds: [],
+  day: null,
+};
+
 function formatDateDisplay(value: string) {
   if (!value) {
     return "-";
@@ -60,14 +75,14 @@ export function BetsCalculatorTable() {
   const [rows, setRows] = useState<MatchBet[]>([]);
   const [defaultStake, setDefaultStake] = useState("10");
   const [rowStakes, setRowStakes] = useState<Record<string, string>>({});
-  const [accumulators, setAccumulators] = useState<DailyAccumulator[]>([
-    { id: "acc-1", name: "Accumulator 1", stake: "10", matchIds: [], day: null },
-  ]);
+  const [accumulators, setAccumulators] = useState<DailyAccumulator[]>([initialAccumulator]);
   const [activeAccumulatorId, setActiveAccumulatorId] = useState("acc-1");
   const [accumulatorError, setAccumulatorError] = useState<string | null>(null);
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
   const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
   const [filterMode, setFilterMode] = useState<"date" | "range">("date");
+  const [isBetsStateHydrated, setIsBetsStateHydrated] = useState(false);
+  const lastSavedStateRef = useRef<string>("");
 
   const matchesCollection = useMemo(() => {
     if (!db || !uid) {
@@ -76,15 +91,103 @@ export function BetsCalculatorTable() {
     return collection(db, "users", uid, "matches");
   }, [uid]);
 
+  const betsStateDoc = useMemo(() => {
+    if (!db || !uid) {
+      return null;
+    }
+    return firestoreDoc(db, "users", uid, "appState", "bets");
+  }, [uid]);
+
   useEffect(() => {
     if (!auth) {
       return;
     }
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUid(user?.uid ?? null);
+      if (!user) {
+        setIsBetsStateHydrated(false);
+      }
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!betsStateDoc) {
+      return;
+    }
+
+    const unsubscribe = onSnapshot(
+      betsStateDoc,
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          const baseline = {
+            defaultStake: "10",
+            rowStakes: {},
+            accumulators: [initialAccumulator],
+            activeAccumulatorId: initialAccumulator.id,
+          };
+          lastSavedStateRef.current = serializeBetsState(baseline);
+          setIsBetsStateHydrated(true);
+          return;
+        }
+
+        const data = snapshot.data();
+        const loadedDefaultStake = String(data.defaultStake ?? "10");
+        const loadedRowStakes = Object.fromEntries(
+          Object.entries((data.rowStakes as Record<string, unknown>) ?? {}).map(
+            ([key, value]) => [key, String(value ?? "")]
+          )
+        );
+
+        const loadedAccumulatorsRaw = Array.isArray(data.accumulators)
+          ? (data.accumulators as Array<Record<string, unknown>>)
+          : [];
+        const loadedAccumulators: DailyAccumulator[] = loadedAccumulatorsRaw
+          .map((item, index) => {
+            const id = String(item.id ?? `acc-${index + 1}`);
+            return {
+              id,
+              name: String(item.name ?? `Accumulator ${index + 1}`),
+              stake: String(item.stake ?? loadedDefaultStake),
+              matchIds: Array.isArray(item.matchIds)
+                ? item.matchIds.map((matchId) => String(matchId))
+                : [],
+              day: item.day ? String(item.day) : null,
+            };
+          })
+          .filter((item) => item.id.length > 0);
+
+        const safeAccumulators = loadedAccumulators.length
+          ? loadedAccumulators
+          : [initialAccumulator];
+        const loadedActiveId = String(data.activeAccumulatorId ?? safeAccumulators[0].id);
+        const safeActiveId = safeAccumulators.some((item) => item.id === loadedActiveId)
+          ? loadedActiveId
+          : safeAccumulators[0].id;
+
+        setDefaultStake(loadedDefaultStake);
+        setRowStakes(loadedRowStakes);
+        setAccumulators(safeAccumulators);
+        setActiveAccumulatorId(safeActiveId);
+        setAccumulatorError(null);
+
+        const normalized = {
+          defaultStake: loadedDefaultStake,
+          rowStakes: loadedRowStakes,
+          accumulators: safeAccumulators,
+          activeAccumulatorId: safeActiveId,
+        };
+        lastSavedStateRef.current = serializeBetsState(normalized);
+        setIsBetsStateHydrated(true);
+      },
+      () => {
+        setIsBetsStateHydrated(true);
+        setAccumulatorError("Bets state could not be loaded due to Firestore permissions.");
+      }
+    );
+
+    return () => unsubscribe();
+  }, [betsStateDoc]);
 
   useEffect(() => {
     if (!matchesCollection) {
@@ -92,47 +195,90 @@ export function BetsCalculatorTable() {
     }
 
     const matchesQuery = query(matchesCollection, orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(matchesQuery, (snapshot) => {
-      const nextRows: MatchBet[] = snapshot.docs.map((item) => {
-        const data = item.data();
-        return {
-          id: item.id,
-          date: String(data.date ?? ""),
-          homeTeam: String(data.homeTeam ?? ""),
-          awayTeam: String(data.awayTeam ?? ""),
-          winnerSide: data.winnerSide === "away" ? "away" : "home",
-          odds: String(data.odds ?? ""),
-        };
-      });
-      setRows(nextRows);
-      setRowStakes((prev) => {
-        const next: Record<string, string> = {};
-        nextRows.forEach((row) => {
-          next[row.id] = prev[row.id] ?? defaultStake;
-        });
-        return next;
-      });
-      setAccumulators((prev) => {
-        const cleaned = prev.map((accumulator) => {
-          const validIds = accumulator.matchIds.filter((id) =>
-            nextRows.some((row) => row.id === id)
-          );
-          const firstRow = nextRows.find((row) => row.id === validIds[0]);
+    const unsubscribe = onSnapshot(
+      matchesQuery,
+      (snapshot) => {
+        const nextRows: MatchBet[] = snapshot.docs.map((item) => {
+          const data = item.data();
           return {
-            ...accumulator,
-            matchIds: validIds,
-            day: firstRow?.date ?? null,
+            id: item.id,
+            date: String(data.date ?? ""),
+            homeTeam: String(data.homeTeam ?? ""),
+            awayTeam: String(data.awayTeam ?? ""),
+            winnerSide: data.winnerSide === "away" ? "away" : "home",
+            odds: String(data.odds ?? ""),
           };
         });
+        setRows(nextRows);
+        setRowStakes((prev) => {
+          const next: Record<string, string> = {};
+          nextRows.forEach((row) => {
+            next[row.id] = prev[row.id] ?? defaultStake;
+          });
+          return next;
+        });
+        setAccumulators((prev) => {
+          const cleaned = prev.map((accumulator) => {
+            const validIds = accumulator.matchIds.filter((id) =>
+              nextRows.some((row) => row.id === id)
+            );
+            const firstRow = nextRows.find((row) => row.id === validIds[0]);
+            return {
+              ...accumulator,
+              matchIds: validIds,
+              day: firstRow?.date ?? null,
+            };
+          });
 
-        return cleaned.length
-          ? cleaned
-          : [{ id: "acc-1", name: "Accumulator 1", stake: "10", matchIds: [], day: null }];
-      });
-    });
+          const nextAccumulators = cleaned.length ? cleaned : [initialAccumulator];
+          setActiveAccumulatorId((currentActiveId) =>
+            nextAccumulators.some((item) => item.id === currentActiveId)
+              ? currentActiveId
+              : nextAccumulators[0].id
+          );
+          return nextAccumulators;
+        });
+        setAccumulatorError(null);
+      },
+      () => {
+        setAccumulatorError("Matches could not be loaded due to Firestore permissions.");
+      }
+    );
 
     return () => unsubscribe();
   }, [defaultStake, matchesCollection]);
+
+  useEffect(() => {
+    if (!betsStateDoc || !isBetsStateHydrated) {
+      return;
+    }
+
+    const payload = {
+      defaultStake,
+      rowStakes,
+      accumulators,
+      activeAccumulatorId,
+    };
+    const serialized = serializeBetsState(payload);
+    if (serialized === lastSavedStateRef.current) {
+      return;
+    }
+
+    setDoc(betsStateDoc, payload, { merge: true })
+      .then(() => {
+        lastSavedStateRef.current = serialized;
+      })
+      .catch(() => {
+        // Ignore transient write errors; UI state remains available locally.
+      });
+  }, [
+    activeAccumulatorId,
+    accumulators,
+    betsStateDoc,
+    defaultStake,
+    isBetsStateHydrated,
+    rowStakes,
+  ]);
 
   function getRowStake(rowId: string) {
     return Number(rowStakes[rowId] ?? defaultStake) || 0;
@@ -194,7 +340,7 @@ export function BetsCalculatorTable() {
       const next = prev.filter((accumulator) => accumulator.id !== id);
       return next.length
         ? next
-        : [{ id: "acc-1", name: "Accumulator 1", stake: "10", matchIds: [], day: null }];
+        : [initialAccumulator];
     });
     if (activeAccumulatorId === id) {
       const fallback = accumulators.find((accumulator) => accumulator.id !== id);
@@ -624,4 +770,28 @@ export function BetsCalculatorTable() {
       </CardContent>
     </Card>
   );
+}
+
+function serializeBetsState(state: {
+  defaultStake: string;
+  rowStakes: Record<string, string>;
+  accumulators: DailyAccumulator[];
+  activeAccumulatorId: string;
+}) {
+  const sortedRowStakes = Object.fromEntries(
+    Object.entries(state.rowStakes).sort(([a], [b]) => a.localeCompare(b))
+  );
+  const normalized = {
+    defaultStake: state.defaultStake,
+    rowStakes: sortedRowStakes,
+    accumulators: state.accumulators.map((item) => ({
+      id: item.id,
+      name: item.name,
+      stake: item.stake,
+      matchIds: [...item.matchIds],
+      day: item.day,
+    })),
+    activeAccumulatorId: state.activeAccumulatorId,
+  };
+  return JSON.stringify(normalized);
 }

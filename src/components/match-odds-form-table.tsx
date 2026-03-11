@@ -136,23 +136,29 @@ export function MatchOddsFormTable() {
     }
 
     const matchesQuery = query(matchesCollection, orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(matchesQuery, (snapshot) => {
-      const nextRows: MatchRow[] = snapshot.docs.map((item) => {
-        const data = item.data();
-        return {
-          id: item.id,
-          date: String(data.date ?? ""),
-          homeTeam: String(data.homeTeam ?? ""),
-          awayTeam: String(data.awayTeam ?? ""),
-          competition: String(data.competition ?? ""),
-          country: String(data.country ?? ""),
-          winnerPercent: String(data.winnerPercent ?? ""),
-          winnerSide: data.winnerSide === "away" ? "away" : "home",
-          odds: String(data.odds ?? ""),
-        };
-      });
-      setRows(nextRows);
-    });
+    const unsubscribe = onSnapshot(
+      matchesQuery,
+      (snapshot) => {
+        const nextRows: MatchRow[] = snapshot.docs.map((item) => {
+          const data = item.data();
+          return {
+            id: item.id,
+            date: String(data.date ?? ""),
+            homeTeam: String(data.homeTeam ?? ""),
+            awayTeam: String(data.awayTeam ?? ""),
+            competition: String(data.competition ?? ""),
+            country: String(data.country ?? ""),
+            winnerPercent: String(data.winnerPercent ?? ""),
+            winnerSide: data.winnerSide === "away" ? "away" : "home",
+            odds: String(data.odds ?? ""),
+          };
+        });
+        setRows(nextRows);
+      },
+      () => {
+        setError("Matches could not be loaded due to Firestore permissions.");
+      }
+    );
 
     return () => unsubscribe();
   }, [matchesCollection]);

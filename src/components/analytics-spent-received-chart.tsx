@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
 import {
   Bar,
   BarChart,
@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 type MatchAnalyticsRow = {
+  id: string;
   date: string;
   odds: string;
   winnerSide: "home" | "away";
@@ -43,6 +44,19 @@ type ChartRow = {
 };
 
 type RangeMode = "7d" | "30d" | "90d";
+
+type PersistedAccumulator = {
+  id: string;
+  stake: string;
+  matchIds: string[];
+  day: string | null;
+};
+
+type BetsState = {
+  defaultStake: string;
+  rowStakes: Record<string, string>;
+  accumulators: PersistedAccumulator[];
+};
 
 const chartConfig = {
   spent: {
@@ -107,13 +121,26 @@ function formatDateTick(value: string) {
 export function AnalyticsSpentReceivedChart() {
   const [uid, setUid] = useState<string | null>(auth?.currentUser?.uid ?? null);
   const [rows, setRows] = useState<MatchAnalyticsRow[]>([]);
+  const [betsState, setBetsState] = useState<BetsState>({
+    defaultStake: "10",
+    rowStakes: {},
+    accumulators: [],
+  });
   const [rangeMode, setRangeMode] = useState<RangeMode>("90d");
+  const [listenerError, setListenerError] = useState<string | null>(null);
 
   const matchesCollection = useMemo(() => {
     if (!db || !uid) {
       return null;
     }
     return collection(db, "users", uid, "matches");
+  }, [uid]);
+
+  const betsStateDoc = useMemo(() => {
+    if (!db || !uid) {
+      return null;
+    }
+    return doc(db, "users", uid, "appState", "bets");
   }, [uid]);
 
   useEffect(() => {
@@ -133,28 +160,83 @@ export function AnalyticsSpentReceivedChart() {
     }
 
     const matchesQuery = query(matchesCollection, orderBy("date", "asc"));
-    const unsubscribe = onSnapshot(matchesQuery, (snapshot) => {
-      const nextRows: MatchAnalyticsRow[] = snapshot.docs.map((item) => {
-        const data = item.data();
-        return {
-          date: String(data.date ?? ""),
-          odds: String(data.odds ?? ""),
-          winnerSide: data.winnerSide === "away" ? "away" : "home",
-          actualWinnerSide:
-            data.actualWinnerSide === "home" || data.actualWinnerSide === "away"
-              ? data.actualWinnerSide
-              : null,
-        };
-      });
-      setRows(nextRows);
-    });
+    const unsubscribe = onSnapshot(
+      matchesQuery,
+      (snapshot) => {
+        const nextRows: MatchAnalyticsRow[] = snapshot.docs.map((item) => {
+          const data = item.data();
+          return {
+            id: item.id,
+            date: String(data.date ?? ""),
+            odds: String(data.odds ?? ""),
+            winnerSide: data.winnerSide === "away" ? "away" : "home",
+            actualWinnerSide:
+              data.actualWinnerSide === "home" || data.actualWinnerSide === "away"
+                ? data.actualWinnerSide
+                : null,
+          };
+        });
+        setRows(nextRows);
+        setListenerError(null);
+      },
+      () => {
+        setListenerError("Analytics data could not be loaded due to Firestore permissions.");
+      }
+    );
 
     return () => unsubscribe();
   }, [matchesCollection]);
 
+  useEffect(() => {
+    if (!betsStateDoc) {
+      return;
+    }
+
+    const unsubscribe = onSnapshot(
+      betsStateDoc,
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setBetsState({
+            defaultStake: "10",
+            rowStakes: {},
+            accumulators: [],
+          });
+          return;
+        }
+
+        const data = snapshot.data();
+        setBetsState({
+          defaultStake: String(data.defaultStake ?? "10"),
+          rowStakes: Object.fromEntries(
+            Object.entries((data.rowStakes as Record<string, unknown>) ?? {}).map(
+              ([key, value]) => [key, String(value ?? "")]
+            )
+          ),
+          accumulators: Array.isArray(data.accumulators)
+            ? (data.accumulators as Array<Record<string, unknown>>).map((acc, index) => ({
+                id: String(acc.id ?? `acc-${index + 1}`),
+                stake: String(acc.stake ?? "0"),
+                matchIds: Array.isArray(acc.matchIds)
+                  ? acc.matchIds.map((matchId) => String(matchId))
+                  : [],
+                day: acc.day ? String(acc.day) : null,
+              }))
+            : [],
+        });
+      },
+      () => {
+        setListenerError("Bets state could not be loaded due to Firestore permissions.");
+      }
+    );
+
+    return () => unsubscribe();
+  }, [betsStateDoc]);
+
   const fullChartData = useMemo<ChartRow[]>(() => {
     const byDate = new Map<string, ChartRow>();
+    const matchesById = new Map(rows.map((row) => [row.id, row]));
 
+    // Singles (per fixture stakes)
     rows.forEach((row) => {
       if (!row.date) {
         return;
@@ -163,6 +245,11 @@ export function AnalyticsSpentReceivedChart() {
       const oddsValue = Number(row.odds);
       const isWinningPrediction =
         row.actualWinnerSide !== null && row.actualWinnerSide === row.winnerSide;
+      const stakeValue = Number(
+        betsState.rowStakes[row.id] && betsState.rowStakes[row.id] !== ""
+          ? betsState.rowStakes[row.id]
+          : betsState.defaultStake
+      );
 
       const existing = byDate.get(row.date) ?? {
         date: row.date,
@@ -170,17 +257,67 @@ export function AnalyticsSpentReceivedChart() {
         received: 0,
       };
 
-      // 1 unit stake per fixture.
-      existing.spent += 1;
-      if (isWinningPrediction && Number.isFinite(oddsValue) && oddsValue > 0) {
-        existing.received += oddsValue;
+      if (Number.isFinite(stakeValue) && stakeValue > 0) {
+        existing.spent += stakeValue;
+        if (isWinningPrediction && Number.isFinite(oddsValue) && oddsValue > 0) {
+          existing.received += stakeValue * oddsValue;
+        }
       }
 
       byDate.set(row.date, existing);
     });
 
+    // Accumulators (daily stake on combined odds)
+    betsState.accumulators.forEach((accumulator) => {
+      if (!accumulator.matchIds.length) {
+        return;
+      }
+
+      const stakeValue = Number(accumulator.stake);
+      if (!Number.isFinite(stakeValue) || stakeValue <= 0) {
+        return;
+      }
+
+      const accumulatorMatches = accumulator.matchIds
+        .map((id) => matchesById.get(id))
+        .filter((match): match is MatchAnalyticsRow => Boolean(match));
+      if (!accumulatorMatches.length) {
+        return;
+      }
+
+      const day = accumulator.day ?? accumulatorMatches[0].date;
+      if (!day) {
+        return;
+      }
+
+      const existing = byDate.get(day) ?? {
+        date: day,
+        spent: 0,
+        received: 0,
+      };
+      existing.spent += stakeValue;
+
+      let allWon = true;
+      let combinedOdds = 1;
+      for (const match of accumulatorMatches) {
+        const oddsValue = Number(match.odds);
+        const won = match.actualWinnerSide !== null && match.actualWinnerSide === match.winnerSide;
+        if (!won || !Number.isFinite(oddsValue) || oddsValue <= 0) {
+          allWon = false;
+          break;
+        }
+        combinedOdds *= oddsValue;
+      }
+
+      if (allWon) {
+        existing.received += stakeValue * combinedOdds;
+      }
+
+      byDate.set(day, existing);
+    });
+
     return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [rows]);
+  }, [betsState, rows]);
 
   const chartData = useMemo(() => {
     const days = rangeMode === "7d" ? 7 : rangeMode === "30d" ? 30 : 90;
@@ -209,17 +346,6 @@ export function AnalyticsSpentReceivedChart() {
 
     return sequence;
   }, [fullChartData, rangeMode]);
-
-  const totals = useMemo(() => {
-    return chartData.reduce(
-      (acc, row) => {
-        acc.spent += row.spent;
-        acc.received += row.received;
-        return acc;
-      },
-      { spent: 0, received: 0 }
-    );
-  }, [chartData]);
 
   const rangeLabel =
     rangeMode === "90d"
@@ -266,19 +392,10 @@ export function AnalyticsSpentReceivedChart() {
         </DropdownMenu>
       </CardHeader>
       <CardContent className="space-y-4 px-2 pt-4 sm:px-6 sm:pt-6">
-        <div className="flex flex-wrap gap-4 text-sm">
-          <div className="rounded-md border px-3 py-2">
-            <p className="text-muted-foreground">Spent</p>
-            <p className="text-lg font-semibold">{totals.spent.toFixed(2)}</p>
-          </div>
-          <div className="rounded-md border px-3 py-2">
-            <p className="text-muted-foreground">Received</p>
-            <p className="text-lg font-semibold">{totals.received.toFixed(2)}</p>
-          </div>
-        </div>
         {chartData.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No chart data yet. Add matches and set results to populate analytics.
+            {listenerError ??
+              "No chart data yet. Add matches and set results to populate analytics."}
           </p>
         ) : (
           <ChartContainer config={chartConfig} className="h-[420px] w-full">
