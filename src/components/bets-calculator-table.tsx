@@ -32,6 +32,14 @@ type MatchBet = {
   odds: string;
 };
 
+type DailyAccumulator = {
+  id: string;
+  name: string;
+  stake: string;
+  matchIds: string[];
+  day: string | null;
+};
+
 function formatDateDisplay(value: string) {
   if (!value) {
     return "-";
@@ -52,13 +60,14 @@ export function BetsCalculatorTable() {
   const [rows, setRows] = useState<MatchBet[]>([]);
   const [defaultStake, setDefaultStake] = useState("10");
   const [rowStakes, setRowStakes] = useState<Record<string, string>>({});
-  const [accumulatorStake, setAccumulatorStake] = useState("10");
-  const [accumulatorIds, setAccumulatorIds] = useState<string[]>([]);
+  const [accumulators, setAccumulators] = useState<DailyAccumulator[]>([
+    { id: "acc-1", name: "Accumulator 1", stake: "10", matchIds: [], day: null },
+  ]);
+  const [activeAccumulatorId, setActiveAccumulatorId] = useState("acc-1");
+  const [accumulatorError, setAccumulatorError] = useState<string | null>(null);
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
   const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
   const [filterMode, setFilterMode] = useState<"date" | "range">("date");
-
-  const accumulatorStakeValue = Number(accumulatorStake) || 0;
 
   const matchesCollection = useMemo(() => {
     if (!db || !uid) {
@@ -96,13 +105,29 @@ export function BetsCalculatorTable() {
         };
       });
       setRows(nextRows);
-      setAccumulatorIds((prev) => prev.filter((id) => nextRows.some((r) => r.id === id)));
       setRowStakes((prev) => {
         const next: Record<string, string> = {};
         nextRows.forEach((row) => {
           next[row.id] = prev[row.id] ?? defaultStake;
         });
         return next;
+      });
+      setAccumulators((prev) => {
+        const cleaned = prev.map((accumulator) => {
+          const validIds = accumulator.matchIds.filter((id) =>
+            nextRows.some((row) => row.id === id)
+          );
+          const firstRow = nextRows.find((row) => row.id === validIds[0]);
+          return {
+            ...accumulator,
+            matchIds: validIds,
+            day: firstRow?.date ?? null,
+          };
+        });
+
+        return cleaned.length
+          ? cleaned
+          : [{ id: "acc-1", name: "Accumulator 1", stake: "10", matchIds: [], day: null }];
       });
     });
 
@@ -150,9 +175,62 @@ export function BetsCalculatorTable() {
     return new Date(value.getFullYear(), value.getMonth(), value.getDate(), 23, 59, 59, 999);
   }
 
-  function toggleAccumulator(rowId: string) {
-    setAccumulatorIds((prev) =>
-      prev.includes(rowId) ? prev.filter((id) => id !== rowId) : [...prev, rowId]
+  function createAccumulator() {
+    const nextIndex = accumulators.length + 1;
+    const nextId = `acc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const nextAccumulator: DailyAccumulator = {
+      id: nextId,
+      name: `Accumulator ${nextIndex}`,
+      stake: "10",
+      matchIds: [],
+      day: null,
+    };
+    setAccumulators((prev) => [...prev, nextAccumulator]);
+    setActiveAccumulatorId(nextId);
+  }
+
+  function removeAccumulator(id: string) {
+    setAccumulators((prev) => {
+      const next = prev.filter((accumulator) => accumulator.id !== id);
+      return next.length
+        ? next
+        : [{ id: "acc-1", name: "Accumulator 1", stake: "10", matchIds: [], day: null }];
+    });
+    if (activeAccumulatorId === id) {
+      const fallback = accumulators.find((accumulator) => accumulator.id !== id);
+      setActiveAccumulatorId(fallback?.id ?? "acc-1");
+    }
+  }
+
+  function toggleMatchForActiveAccumulator(row: MatchBet) {
+    setAccumulatorError(null);
+    setAccumulators((prev) =>
+      prev.map((accumulator) => {
+        if (accumulator.id !== activeAccumulatorId) {
+          return accumulator;
+        }
+
+        if (accumulator.matchIds.includes(row.id)) {
+          const nextMatchIds = accumulator.matchIds.filter((id) => id !== row.id);
+          const nextDay = nextMatchIds.length > 0 ? accumulator.day : null;
+          return {
+            ...accumulator,
+            matchIds: nextMatchIds,
+            day: nextDay,
+          };
+        }
+
+        if (accumulator.day && accumulator.day !== row.date) {
+          setAccumulatorError("Each accumulator is daily. Add fixtures from the same date only.");
+          return accumulator;
+        }
+
+        return {
+          ...accumulator,
+          day: accumulator.day ?? row.date,
+          matchIds: [...accumulator.matchIds, row.id],
+        };
+      })
     );
   }
 
@@ -192,17 +270,30 @@ export function BetsCalculatorTable() {
     });
   }, [filterDate, filterDateRange, filterMode, rows]);
 
-  const accumulatorRows = filteredRows.filter((row) => accumulatorIds.includes(row.id));
-  const combinedOdds = accumulatorRows.reduce((total, row) => {
-    const parsed = Number(row.odds);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      return total;
-    }
-    return total * parsed;
-  }, 1);
-  const accumulatorReturn =
-    accumulatorRows.length > 0 ? accumulatorStakeValue * combinedOdds : 0;
-  const accumulatorProfit = accumulatorReturn - accumulatorStakeValue;
+  const activeAccumulator = accumulators.find(
+    (accumulator) => accumulator.id === activeAccumulatorId
+  );
+
+  const accumulatorSummaries = accumulators.map((accumulator) => {
+    const matches = rows.filter((row) => accumulator.matchIds.includes(row.id));
+    const combinedOdds = matches.reduce((total, row) => {
+      const parsed = Number(row.odds);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return total;
+      }
+      return total * parsed;
+    }, 1);
+    const stakeValue = Number(accumulator.stake) || 0;
+    const potentialReturn = matches.length ? combinedOdds * stakeValue : 0;
+    const profit = potentialReturn - stakeValue;
+    return {
+      ...accumulator,
+      matches,
+      combinedOdds,
+      potentialReturn,
+      profit,
+    };
+  });
 
   return (
     <Card>
@@ -325,6 +416,36 @@ export function BetsCalculatorTable() {
           </p>
         ) : null}
 
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Label className="text-xs text-muted-foreground">Active Accumulator</Label>
+            {accumulators.map((accumulator) => (
+              <Button
+                key={accumulator.id}
+                type="button"
+                size="sm"
+                variant={activeAccumulatorId === accumulator.id ? "default" : "outline"}
+                onClick={() => setActiveAccumulatorId(accumulator.id)}
+              >
+                {accumulator.name}
+              </Button>
+            ))}
+            <Button type="button" size="sm" variant="secondary" onClick={createAccumulator}>
+              Add Accumulator
+            </Button>
+          </div>
+          {activeAccumulator?.day ? (
+            <p className="text-xs text-muted-foreground">
+              {activeAccumulator.name} day: {formatDateDisplay(activeAccumulator.day)}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Add a fixture to set the day for {activeAccumulator?.name ?? "active accumulator"}.
+            </p>
+          )}
+          {accumulatorError ? <p className="text-xs text-destructive">{accumulatorError}</p> : null}
+        </div>
+
         <Table className="table-fixed">
           <TableHeader>
             <TableRow>
@@ -384,10 +505,19 @@ export function BetsCalculatorTable() {
                       <Button
                         type="button"
                         size="sm"
-                        variant={accumulatorIds.includes(row.id) ? "default" : "outline"}
-                        onClick={() => toggleAccumulator(row.id)}
+                        variant={
+                          activeAccumulator?.matchIds.includes(row.id) ? "default" : "outline"
+                        }
+                        onClick={() => toggleMatchForActiveAccumulator(row)}
+                        disabled={
+                          Boolean(
+                            activeAccumulator?.day &&
+                              activeAccumulator.day !== row.date &&
+                              !activeAccumulator.matchIds.includes(row.id)
+                          )
+                        }
                       >
-                        {accumulatorIds.includes(row.id) ? "Added" : "Add"}
+                        {activeAccumulator?.matchIds.includes(row.id) ? "Added" : "Add"}
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -398,64 +528,96 @@ export function BetsCalculatorTable() {
         </Table>
 
         <div className="space-y-3 rounded-md border p-4">
-          <h3 className="text-sm font-medium">Accumulator</h3>
+          <h3 className="text-sm font-medium">Daily Accumulators</h3>
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-[10rem]">Name</TableHead>
+                <TableHead className="w-[9rem]">Day</TableHead>
                 <TableHead className="w-[12rem]">Stake</TableHead>
                 <TableHead className="w-[6rem]">Games</TableHead>
                 <TableHead className="w-[10rem]">Combined Odds</TableHead>
                 <TableHead className="w-[10rem]">Return</TableHead>
                 <TableHead className="w-[10rem]">Profit</TableHead>
-                <TableHead className="w-[8rem]">Actions</TableHead>
+                <TableHead className="w-[12rem]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow>
-                <TableCell>
-                  <Input
-                    id="accumulatorStake"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={accumulatorStake}
-                    onChange={(event) => setAccumulatorStake(event.target.value)}
-                    className="h-8"
-                  />
-                </TableCell>
-                <TableCell>{accumulatorRows.length}</TableCell>
-                <TableCell>
-                  {accumulatorRows.length ? combinedOdds.toFixed(2) : "0.00"}
-                </TableCell>
-                <TableCell>
-                  {accumulatorRows.length ? accumulatorReturn.toFixed(2) : "0.00"}
-                </TableCell>
-                <TableCell>
-                  {accumulatorRows.length ? accumulatorProfit.toFixed(2) : "0.00"}
-                </TableCell>
-                <TableCell>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setAccumulatorIds([])}
-                    disabled={accumulatorRows.length === 0}
-                  >
-                    Clear
-                  </Button>
-                </TableCell>
-              </TableRow>
+              {accumulatorSummaries.map((summary) => (
+                <TableRow key={summary.id}>
+                  <TableCell>{summary.name}</TableCell>
+                  <TableCell>{summary.day ? formatDateDisplay(summary.day) : "-"}</TableCell>
+                  <TableCell>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={summary.stake}
+                      onChange={(event) =>
+                        setAccumulators((prev) =>
+                          prev.map((accumulator) =>
+                            accumulator.id === summary.id
+                              ? { ...accumulator, stake: event.target.value }
+                              : accumulator
+                          )
+                        )
+                      }
+                      className="h-8"
+                    />
+                  </TableCell>
+                  <TableCell>{summary.matches.length}</TableCell>
+                  <TableCell>
+                    {summary.matches.length ? summary.combinedOdds.toFixed(2) : "0.00"}
+                  </TableCell>
+                  <TableCell>
+                    {summary.matches.length ? summary.potentialReturn.toFixed(2) : "0.00"}
+                  </TableCell>
+                  <TableCell>{summary.matches.length ? summary.profit.toFixed(2) : "0.00"}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setAccumulators((prev) =>
+                            prev.map((accumulator) =>
+                              accumulator.id === summary.id
+                                ? { ...accumulator, matchIds: [], day: null }
+                                : accumulator
+                            )
+                          )
+                        }
+                        disabled={summary.matches.length === 0}
+                      >
+                        Clear
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => removeAccumulator(summary.id)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
-          {accumulatorRows.length ? (
-            <p className="text-xs text-muted-foreground">
-              {accumulatorRows
-                .map((row) => `${row.homeTeam} vs ${row.awayTeam}`)
-                .join(" | ")}
-            </p>
+          {accumulatorSummaries.some((summary) => summary.matches.length > 0) ? (
+            accumulatorSummaries.map((summary) =>
+              summary.matches.length ? (
+                <p key={summary.id} className="text-xs text-muted-foreground">
+                  {summary.name}:{" "}
+                  {summary.matches.map((row) => `${row.homeTeam} vs ${row.awayTeam}`).join(" | ")}
+                </p>
+              ) : null
+            )
           ) : (
             <p className="text-xs text-muted-foreground">
-              Add games to accumulator to preview total return.
+              Add games to an accumulator to preview total return.
             </p>
           )}
         </div>
