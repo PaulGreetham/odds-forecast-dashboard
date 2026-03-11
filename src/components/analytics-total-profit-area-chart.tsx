@@ -348,7 +348,7 @@ export function AnalyticsTotalProfitAreaChart() {
               margin={{
                 left: 8,
                 right: 16,
-                top: 8,
+                top: 36,
                 bottom: 8,
               }}
             >
@@ -367,7 +367,11 @@ export function AnalyticsTotalProfitAreaChart() {
                 minTickGap={32}
                 tickFormatter={formatDateTick}
               />
-              <YAxis tickLine={false} axisLine={false} />
+              <YAxis
+                tickLine={false}
+                axisLine={false}
+                domain={[(min: number) => min - 2, (max: number) => max + 2]}
+              />
               <ChartTooltip
                 cursor={false}
                 content={
