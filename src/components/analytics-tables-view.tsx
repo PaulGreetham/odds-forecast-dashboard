@@ -51,7 +51,7 @@ type MatchRow = {
   country: string;
   winnerPercent: string;
   winnerSide: "home" | "away";
-  actualWinnerSide: "home" | "away" | null;
+  actualWinnerSide: "home" | "away" | "draw" | null;
   odds: string;
 };
 
@@ -179,7 +179,9 @@ export function AnalyticsTablesView() {
             winnerPercent: String(data.winnerPercent ?? "0"),
             winnerSide: data.winnerSide === "away" ? "away" : "home",
             actualWinnerSide:
-              data.actualWinnerSide === "home" || data.actualWinnerSide === "away"
+              data.actualWinnerSide === "home" ||
+              data.actualWinnerSide === "away" ||
+              data.actualWinnerSide === "draw"
                 ? data.actualWinnerSide
                 : null,
             odds: String(data.odds ?? "0"),
@@ -247,6 +249,8 @@ export function AnalyticsTablesView() {
       const actualWinner =
         row.actualWinnerSide === null
           ? "Pending"
+          : row.actualWinnerSide === "draw"
+            ? "Draw"
           : row.actualWinnerSide === "away"
             ? row.awayTeam
             : row.homeTeam;

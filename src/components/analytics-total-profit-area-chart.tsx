@@ -27,7 +27,7 @@ type MatchRow = {
   date: string;
   odds: string;
   winnerSide: "home" | "away";
-  actualWinnerSide: "home" | "away" | null;
+  actualWinnerSide: "home" | "away" | "draw" | null;
 };
 
 type PersistedAccumulator = {
@@ -150,7 +150,9 @@ export function AnalyticsTotalProfitAreaChart() {
             odds: String(data.odds ?? "0"),
             winnerSide: data.winnerSide === "away" ? "away" : "home",
             actualWinnerSide:
-              data.actualWinnerSide === "home" || data.actualWinnerSide === "away"
+              data.actualWinnerSide === "home" ||
+              data.actualWinnerSide === "away" ||
+              data.actualWinnerSide === "draw"
                 ? data.actualWinnerSide
                 : null,
           };

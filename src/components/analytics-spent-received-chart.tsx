@@ -46,7 +46,7 @@ type MatchAnalyticsRow = {
   date: string;
   odds: string;
   winnerSide: "home" | "away";
-  actualWinnerSide: "home" | "away" | null;
+  actualWinnerSide: "home" | "away" | "draw" | null;
 };
 
 type ChartRow = {
@@ -140,7 +140,8 @@ function formatDateTick(value: string) {
 }
 
 function formatCurrency(value: number) {
-  return `€${value.toFixed(2)}`;
+  const sign = value < 0 ? "-" : "";
+  return `${sign}€${Math.abs(value).toFixed(2)}`;
 }
 
 function formatDeltaCurrency(value: number) {
@@ -242,7 +243,9 @@ export function AnalyticsSpentReceivedChart() {
             odds: String(data.odds ?? ""),
             winnerSide: data.winnerSide === "away" ? "away" : "home",
             actualWinnerSide:
-              data.actualWinnerSide === "home" || data.actualWinnerSide === "away"
+              data.actualWinnerSide === "home" ||
+              data.actualWinnerSide === "away" ||
+              data.actualWinnerSide === "draw"
                 ? data.actualWinnerSide
                 : null,
           };

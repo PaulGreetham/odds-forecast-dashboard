@@ -42,7 +42,7 @@ type MatchResultRow = {
   homeTeam: string;
   awayTeam: string;
   winnerSide: "home" | "away";
-  actualWinnerSide: "home" | "away" | null;
+  actualWinnerSide: "home" | "away" | "draw" | null;
 };
 
 function formatDateDisplay(value: string) {
@@ -109,7 +109,9 @@ export function MatchResultsTable() {
             awayTeam: String(data.awayTeam ?? ""),
             winnerSide: data.winnerSide === "away" ? "away" : "home",
             actualWinnerSide:
-              data.actualWinnerSide === "home" || data.actualWinnerSide === "away"
+              data.actualWinnerSide === "home" ||
+              data.actualWinnerSide === "away" ||
+              data.actualWinnerSide === "draw"
                 ? data.actualWinnerSide
                 : null,
           };
@@ -126,7 +128,7 @@ export function MatchResultsTable() {
     return () => unsubscribe();
   }, [matchesCollection]);
 
-  async function setActualWinner(matchId: string, side: "home" | "away") {
+  async function setActualWinner(matchId: string, side: "home" | "away" | "draw") {
     if (!matchesCollection) {
       return;
     }
@@ -151,6 +153,9 @@ export function MatchResultsTable() {
     }
     if (row.actualWinnerSide === "home") {
       return row.homeTeam || "Home Team";
+    }
+    if (row.actualWinnerSide === "draw") {
+      return "Draw";
     }
     return "Not set";
   }
@@ -322,28 +327,42 @@ export function MatchResultsTable() {
             size="sm"
             variant={row.original.actualWinnerSide === "home" ? "default" : "outline"}
             className={cn(
-              "min-w-[7rem] justify-start",
+              "min-w-[6rem] justify-center",
               row.original.actualWinnerSide === "home" &&
                 "bg-emerald-600 text-white hover:bg-emerald-700"
             )}
             onClick={() => setActualWinner(row.original.id, "home")}
             disabled={updatingId === row.original.id}
           >
-            {row.original.homeTeam || "Home Team"}
+            Home
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={row.original.actualWinnerSide === "draw" ? "default" : "outline"}
+            className={cn(
+              "min-w-[6rem] justify-center",
+              row.original.actualWinnerSide === "draw" &&
+                "bg-emerald-600 text-white hover:bg-emerald-700"
+            )}
+            onClick={() => setActualWinner(row.original.id, "draw")}
+            disabled={updatingId === row.original.id}
+          >
+            Draw
           </Button>
           <Button
             type="button"
             size="sm"
             variant={row.original.actualWinnerSide === "away" ? "default" : "outline"}
             className={cn(
-              "min-w-[7rem] justify-start",
+              "min-w-[6rem] justify-center",
               row.original.actualWinnerSide === "away" &&
                 "bg-emerald-600 text-white hover:bg-emerald-700"
             )}
             onClick={() => setActualWinner(row.original.id, "away")}
             disabled={updatingId === row.original.id}
           >
-            {row.original.awayTeam || "Away Team"}
+            Away
           </Button>
         </div>
       ),
