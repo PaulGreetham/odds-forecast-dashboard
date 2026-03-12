@@ -10,7 +10,22 @@ import {
   query,
   setDoc,
 } from "firebase/firestore";
-import { CalendarIcon, XIcon } from "lucide-react";
+import {
+  type ColumnDef,
+  type SortingState,
+  flexRender,
+  getCoreRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
+import {
+  ArrowDownIcon,
+  ArrowUpDownIcon,
+  ArrowUpIcon,
+  CalendarIcon,
+  NotebookPenIcon,
+  XIcon,
+} from "lucide-react";
 import type { DateRange } from "react-day-picker";
 
 import { auth, db, isFirebaseConfigured } from "@/lib/firebase";
@@ -20,6 +35,15 @@ import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Table,
@@ -45,6 +69,7 @@ type DailyAccumulator = {
   stake: string;
   matchIds: string[];
   day: string | null;
+  note: string;
 };
 
 const initialAccumulator: DailyAccumulator = {
@@ -53,7 +78,41 @@ const initialAccumulator: DailyAccumulator = {
   stake: "10",
   matchIds: [],
   day: null,
+  note: "",
 };
+
+function parseDateKey(value: string) {
+  const parts = value.split("-");
+  if (parts.length !== 3) {
+    return null;
+  }
+  const year = Number(parts[0]);
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return null;
+  }
+  const parsed = new Date(year, month - 1, day);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatAccumulatorDateLabel(dayKey: string) {
+  const parsed = parseDateKey(dayKey) ?? new Date(dayKey);
+  if (Number.isNaN(parsed.getTime())) {
+    return dayKey;
+  }
+  const day = parsed.getDate();
+  const month = parsed.getMonth() + 1;
+  const year = parsed.getFullYear() % 100;
+  return `${day}/${month}/${year}`;
+}
+
+function buildAccumulatorName(dayKey: string, index: number) {
+  const dateLabel = formatAccumulatorDateLabel(dayKey);
+  return index === 1
+    ? `${dateLabel} Accumulator`
+    : `${dateLabel} Accumulator ${index}`;
+}
 
 function formatDateDisplay(value: string) {
   if (!value) {
@@ -81,6 +140,10 @@ export function BetsCalculatorTable() {
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
   const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
   const [filterMode, setFilterMode] = useState<"date" | "range">("date");
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [savedNoteId, setSavedNoteId] = useState<string | null>(null);
+  const [openNotePopoverId, setOpenNotePopoverId] = useState<string | null>(null);
   const [isBetsStateHydrated, setIsBetsStateHydrated] = useState(false);
   const lastSavedStateRef = useRef<string>("");
 
@@ -153,6 +216,7 @@ export function BetsCalculatorTable() {
                 ? item.matchIds.map((matchId) => String(matchId))
                 : [],
               day: item.day ? String(item.day) : null,
+              note: String(item.note ?? ""),
             };
           })
           .filter((item) => item.id.length > 0);
@@ -168,6 +232,9 @@ export function BetsCalculatorTable() {
         setDefaultStake(loadedDefaultStake);
         setRowStakes(loadedRowStakes);
         setAccumulators(safeAccumulators);
+        setNoteDrafts(
+          Object.fromEntries(safeAccumulators.map((accumulator) => [accumulator.id, accumulator.note]))
+        );
         setActiveAccumulatorId(safeActiveId);
         setAccumulatorError(null);
 
@@ -249,6 +316,16 @@ export function BetsCalculatorTable() {
   }, [defaultStake, matchesCollection]);
 
   useEffect(() => {
+    setNoteDrafts((prev) => {
+      const next: Record<string, string> = {};
+      accumulators.forEach((accumulator) => {
+        next[accumulator.id] = prev[accumulator.id] ?? accumulator.note ?? "";
+      });
+      return next;
+    });
+  }, [accumulators]);
+
+  useEffect(() => {
     if (!betsStateDoc || !isBetsStateHydrated) {
       return;
     }
@@ -322,16 +399,20 @@ export function BetsCalculatorTable() {
   }
 
   function createAccumulator() {
-    const nextIndex = accumulators.length + 1;
+    const seedDay = filterDateSeed ?? formatDateForInput(new Date());
+    const nextIndex =
+      accumulators.filter((accumulator) => accumulator.day === seedDay).length + 1;
     const nextId = `acc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const nextAccumulator: DailyAccumulator = {
       id: nextId,
-      name: `Accumulator ${nextIndex}`,
+      name: buildAccumulatorName(seedDay, nextIndex),
       stake: "10",
       matchIds: [],
-      day: null,
+      day: seedDay,
+      note: "",
     };
     setAccumulators((prev) => [...prev, nextAccumulator]);
+    setNoteDrafts((prev) => ({ ...prev, [nextId]: "" }));
     setActiveAccumulatorId(nextId);
   }
 
@@ -346,13 +427,51 @@ export function BetsCalculatorTable() {
       const fallback = accumulators.find((accumulator) => accumulator.id !== id);
       setActiveAccumulatorId(fallback?.id ?? "acc-1");
     }
+    setOpenNotePopoverId((current) => (current === id ? null : current));
+    setNoteDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   }
 
-  function toggleMatchForActiveAccumulator(row: MatchBet) {
+  function saveAccumulatorNote(accumulatorId: string) {
+    const nextNote = noteDrafts[accumulatorId] ?? "";
+    setAccumulators((prev) =>
+      prev.map((accumulator) =>
+        accumulator.id === accumulatorId ? { ...accumulator, note: nextNote } : accumulator
+      )
+    );
+    setSavedNoteId(accumulatorId);
+    setOpenNotePopoverId(null);
+  }
+
+  function clearAccumulatorNote(accumulatorId: string) {
+    setNoteDrafts((prev) => ({
+      ...prev,
+      [accumulatorId]: "",
+    }));
+    setAccumulators((prev) =>
+      prev.map((accumulator) =>
+        accumulator.id === accumulatorId ? { ...accumulator, note: "" } : accumulator
+      )
+    );
+    setSavedNoteId(accumulatorId);
+    setOpenNotePopoverId(null);
+  }
+
+  function canToggleMatchForAccumulator(accumulator: DailyAccumulator, row: MatchBet) {
+    if (accumulator.matchIds.includes(row.id)) {
+      return true;
+    }
+    return !accumulator.day || accumulator.day === row.date;
+  }
+
+  function toggleMatchForAccumulator(accumulatorId: string, row: MatchBet) {
     setAccumulatorError(null);
     setAccumulators((prev) =>
       prev.map((accumulator) => {
-        if (accumulator.id !== activeAccumulatorId) {
+        if (accumulator.id !== accumulatorId) {
           return accumulator;
         }
 
@@ -367,7 +486,7 @@ export function BetsCalculatorTable() {
         }
 
         if (accumulator.day && accumulator.day !== row.date) {
-          setAccumulatorError("Each accumulator is daily. Add fixtures from the same date only.");
+          setAccumulatorError("This accumulator is daily. Add fixtures from the same date only.");
           return accumulator;
         }
 
@@ -416,9 +535,85 @@ export function BetsCalculatorTable() {
     });
   }, [filterDate, filterDateRange, filterMode, rows]);
 
-  const activeAccumulator = accumulators.find(
+  const filterDateSeed = useMemo(() => {
+    if (filterMode === "date" && filterDate) {
+      return formatDateForInput(filterDate);
+    }
+    if (filterMode === "range" && filterDateRange?.from) {
+      return formatDateForInput(filterDateRange.from);
+    }
+    return null;
+  }, [filterDate, filterDateRange, filterMode]);
+
+  const accumulatorNameById = useMemo(() => {
+    const countsByDay: Record<string, number> = {};
+    const next: Record<string, string> = {};
+
+    accumulators.forEach((accumulator) => {
+      if (!accumulator.day) {
+        // Keep unassigned accumulators as plain names; do not imply day creation.
+        next[accumulator.id] = accumulator.name;
+        return;
+      }
+
+      const dayKey = accumulator.day;
+      const index = (countsByDay[dayKey] ?? 0) + 1;
+      countsByDay[dayKey] = index;
+      next[accumulator.id] = buildAccumulatorName(dayKey, index);
+    });
+
+    return next;
+  }, [accumulators]);
+
+  const filteredActiveAccumulators = useMemo(() => {
+    return accumulators.filter((accumulator) => {
+      // Unassigned accumulators can still be used for the current filter.
+      if (!accumulator.day) {
+        return true;
+      }
+
+      if (filterMode === "date" && !filterDate) {
+        return true;
+      }
+      if (filterMode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
+        return true;
+      }
+
+      const accumulatorDate = parseStoredDate(accumulator.day);
+      if (!accumulatorDate) {
+        return false;
+      }
+
+      if (filterMode === "range" && (filterDateRange?.from || filterDateRange?.to)) {
+        const from = filterDateRange?.from ? startOfDay(filterDateRange.from) : null;
+        const to = filterDateRange?.to ? endOfDay(filterDateRange.to) : from;
+        if (from && accumulatorDate < from) {
+          return false;
+        }
+        if (to && accumulatorDate > to) {
+          return false;
+        }
+        return true;
+      }
+
+      if (filterMode === "date" && filterDate) {
+        const target = formatDateForInput(filterDate);
+        return accumulator.day === target;
+      }
+
+      return true;
+    });
+  }, [accumulators, filterDate, filterDateRange, filterMode]);
+
+  const resolvedActiveAccumulatorId = filteredActiveAccumulators.some(
     (accumulator) => accumulator.id === activeAccumulatorId
-  );
+  )
+    ? activeAccumulatorId
+    : (filteredActiveAccumulators[0]?.id ?? null);
+
+  const activeAccumulator = resolvedActiveAccumulatorId
+    ? accumulators.find((accumulator) => accumulator.id === resolvedActiveAccumulatorId)
+    : null;
 
   const accumulatorSummaries = accumulators.map((accumulator) => {
     const matches = rows.filter((row) => accumulator.matchIds.includes(row.id));
@@ -440,6 +635,316 @@ export function BetsCalculatorTable() {
       profit,
     };
   });
+
+  const filteredAccumulatorSummaries = useMemo(() => {
+    if (filterMode === "date" && !filterDate) {
+      return accumulatorSummaries;
+    }
+
+    if (filterMode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
+      return accumulatorSummaries;
+    }
+
+    return accumulatorSummaries.filter((summary) => {
+      if (!summary.day) {
+        return false;
+      }
+
+      const summaryDate = parseStoredDate(summary.day);
+      if (!summaryDate) {
+        return false;
+      }
+
+      if (filterMode === "range" && (filterDateRange?.from || filterDateRange?.to)) {
+        const from = filterDateRange?.from ? startOfDay(filterDateRange.from) : null;
+        const to = filterDateRange?.to ? endOfDay(filterDateRange.to) : from;
+        if (from && summaryDate < from) {
+          return false;
+        }
+        if (to && summaryDate > to) {
+          return false;
+        }
+        return true;
+      }
+
+      if (filterMode === "date" && filterDate) {
+        const target = formatDateForInput(filterDate);
+        return summary.day === target;
+      }
+
+      return true;
+    });
+  }, [accumulatorSummaries, filterDate, filterDateRange, filterMode]);
+
+  function renderSortIcon(sortState: false | "asc" | "desc") {
+    if (sortState === "asc") {
+      return <ArrowUpIcon className="size-4" />;
+    }
+    if (sortState === "desc") {
+      return <ArrowDownIcon className="size-4" />;
+    }
+    return <ArrowUpDownIcon className="size-4 opacity-60" />;
+  }
+
+  const betColumns: ColumnDef<MatchBet>[] = [
+    {
+      accessorKey: "date",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-3 h-8"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Date
+          {renderSortIcon(column.getIsSorted())}
+        </Button>
+      ),
+      cell: ({ row }) => formatDateDisplay(row.original.date),
+    },
+    {
+      id: "fixture",
+      accessorFn: (row) => `${row.homeTeam} vs ${row.awayTeam}`,
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-3 h-8"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Fixture
+          {renderSortIcon(column.getIsSorted())}
+        </Button>
+      ),
+      cell: ({ row }) => (
+        <span className="block truncate">
+          {row.original.homeTeam} vs {row.original.awayTeam}
+        </span>
+      ),
+    },
+    {
+      id: "betOn",
+      accessorFn: (row) => (row.winnerSide === "away" ? row.awayTeam : row.homeTeam),
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-3 h-8"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Bet On
+          {renderSortIcon(column.getIsSorted())}
+        </Button>
+      ),
+      cell: ({ row }) => {
+        const winnerName =
+          row.original.winnerSide === "away" ? row.original.awayTeam : row.original.homeTeam;
+        return <span className="block truncate text-emerald-600 dark:text-emerald-400">{winnerName}</span>;
+      },
+    },
+    {
+      id: "odds",
+      accessorFn: (row) => Number(row.odds) || 0,
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-3 h-8"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Odds
+          {renderSortIcon(column.getIsSorted())}
+        </Button>
+      ),
+      cell: ({ row }) => row.original.odds,
+    },
+    {
+      id: "stake",
+      accessorFn: (row) => getRowStake(row.id),
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-3 h-8"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Stake
+          {renderSortIcon(column.getIsSorted())}
+        </Button>
+      ),
+      cell: ({ row }) => (
+        <Input
+          type="number"
+          min="0"
+          step="0.01"
+          value={rowStakes[row.original.id] ?? defaultStake}
+          onChange={(event) =>
+            setRowStakes((prev) => ({
+              ...prev,
+              [row.original.id]: event.target.value,
+            }))
+          }
+          className="h-8"
+        />
+      ),
+    },
+    {
+      id: "return",
+      accessorFn: (row) => {
+        const oddsValue = Number(row.odds) || 0;
+        const stakeValue = getRowStake(row.id);
+        return stakeValue * oddsValue;
+      },
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-3 h-8"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Return
+          {renderSortIcon(column.getIsSorted())}
+        </Button>
+      ),
+      cell: ({ row }) => {
+        const oddsValue = Number(row.original.odds) || 0;
+        const stakeValue = getRowStake(row.original.id);
+        return (stakeValue * oddsValue).toFixed(2);
+      },
+    },
+    {
+      id: "profit",
+      accessorFn: (row) => {
+        const oddsValue = Number(row.odds) || 0;
+        const stakeValue = getRowStake(row.id);
+        return stakeValue * oddsValue - stakeValue;
+      },
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-3 h-8"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Profit
+          {renderSortIcon(column.getIsSorted())}
+        </Button>
+      ),
+      cell: ({ row }) => {
+        const oddsValue = Number(row.original.odds) || 0;
+        const stakeValue = getRowStake(row.original.id);
+        return (stakeValue * oddsValue - stakeValue).toFixed(2);
+      },
+    },
+    {
+      id: "accumulator",
+      accessorFn: (row) =>
+        accumulators.filter((accumulator) => accumulator.matchIds.includes(row.id)).length,
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-3 h-8"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          Accumulator
+          {renderSortIcon(column.getIsSorted())}
+        </Button>
+      ),
+      cell: ({ row }) => {
+        const includedCount = accumulators.filter((accumulator) =>
+          accumulator.matchIds.includes(row.original.id)
+        ).length;
+
+        if (accumulators.length <= 1) {
+          const target = accumulators[0];
+          if (!target) {
+            return null;
+          }
+          const checked = target.matchIds.includes(row.original.id);
+          return (
+            <Button
+              type="button"
+              size="sm"
+              variant={checked ? "default" : "outline"}
+              onClick={() => toggleMatchForAccumulator(target.id, row.original)}
+              disabled={!canToggleMatchForAccumulator(target, row.original)}
+            >
+              {checked ? "Added" : "Add"}
+            </Button>
+          );
+        }
+
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button type="button" size="sm" variant={includedCount > 0 ? "default" : "outline"}>
+                  {includedCount > 0 ? `Added (${includedCount})` : "Add"}
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Choose accumulators</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {accumulators.map((accumulator) => {
+                  const checked = accumulator.matchIds.includes(row.original.id);
+                  const canToggle = canToggleMatchForAccumulator(accumulator, row.original);
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={accumulator.id}
+                      checked={checked}
+                      disabled={!checked && !canToggle}
+                      onCheckedChange={() =>
+                        toggleMatchForAccumulator(accumulator.id, row.original)
+                      }
+                    >
+                      {accumulatorNameById[accumulator.id] ?? accumulator.name}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      },
+    },
+  ];
+
+  const betsTable = useReactTable({
+    data: filteredRows,
+    columns: betColumns,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    onSortingChange: setSorting,
+    state: {
+      sorting,
+    },
+  });
+
+  function getBetColumnWidthClass(columnId: string) {
+    switch (columnId) {
+      case "date":
+        return "w-[9rem]";
+      case "fixture":
+        return "w-[18rem]";
+      case "betOn":
+        return "w-[10rem]";
+      case "odds":
+        return "w-[6rem]";
+      case "stake":
+        return "w-[8rem]";
+      case "return":
+        return "w-[10rem]";
+      case "profit":
+        return "w-[8rem]";
+      case "accumulator":
+        return "w-[12rem]";
+      default:
+        return "";
+    }
+  }
 
   return (
     <Card>
@@ -565,28 +1070,39 @@ export function BetsCalculatorTable() {
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <Label className="text-xs text-muted-foreground">Active Accumulator</Label>
-            {accumulators.map((accumulator) => (
-              <Button
-                key={accumulator.id}
-                type="button"
-                size="sm"
-                variant={activeAccumulatorId === accumulator.id ? "default" : "outline"}
-                onClick={() => setActiveAccumulatorId(accumulator.id)}
-              >
-                {accumulator.name}
-              </Button>
-            ))}
+            {filteredActiveAccumulators.length === 0 ? (
+              <span className="text-xs text-muted-foreground">
+                No active accumulators for this date filter.
+              </span>
+            ) : (
+              filteredActiveAccumulators.map((accumulator) => (
+                <Button
+                  key={accumulator.id}
+                  type="button"
+                  size="sm"
+                  variant={resolvedActiveAccumulatorId === accumulator.id ? "default" : "outline"}
+                  onClick={() => setActiveAccumulatorId(accumulator.id)}
+                >
+                  {accumulatorNameById[accumulator.id] ?? accumulator.name}
+                </Button>
+              ))
+            )}
             <Button type="button" size="sm" variant="secondary" onClick={createAccumulator}>
               Add Accumulator
             </Button>
           </div>
           {activeAccumulator?.day ? (
             <p className="text-xs text-muted-foreground">
-              {activeAccumulator.name} day: {formatDateDisplay(activeAccumulator.day)}
+              {(accumulatorNameById[activeAccumulator.id] ?? activeAccumulator.name)} day:{" "}
+              {formatDateDisplay(activeAccumulator.day)}
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">
-              Add a fixture to set the day for {activeAccumulator?.name ?? "active accumulator"}.
+              Add a fixture to set the day for{" "}
+              {activeAccumulator
+                ? (accumulatorNameById[activeAccumulator.id] ?? activeAccumulator.name)
+                : "active accumulator"}
+              .
             </p>
           )}
           {accumulatorError ? <p className="text-xs text-destructive">{accumulatorError}</p> : null}
@@ -594,81 +1110,41 @@ export function BetsCalculatorTable() {
 
         <Table className="table-fixed">
           <TableHeader>
-            <TableRow>
-              <TableHead className="w-[9rem]">Date</TableHead>
-              <TableHead className="w-[18rem]">Fixture</TableHead>
-              <TableHead className="w-[10rem]">Bet On</TableHead>
-              <TableHead className="w-[6rem]">Odds</TableHead>
-              <TableHead className="w-[8rem]">Stake</TableHead>
-              <TableHead className="w-[10rem]">Return</TableHead>
-              <TableHead className="w-[8rem]">Profit</TableHead>
-              <TableHead className="w-[9rem]">Accumulator</TableHead>
-            </TableRow>
+            {betsTable.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <TableHead key={header.id} className={getBetColumnWidthClass(header.column.id)}>
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(header.column.columnDef.header, header.getContext())}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
           </TableHeader>
           <TableBody>
-            {filteredRows.length === 0 ? (
+            {betsTable.getRowModel().rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="py-4 text-muted-foreground">
                   No fixtures yet. Add rows in Matches first.
                 </TableCell>
               </TableRow>
             ) : (
-              filteredRows.map((row) => {
-                const oddsValue = Number(row.odds) || 0;
-                const stakeValue = getRowStake(row.id);
-                const potentialReturn = stakeValue * oddsValue;
-                const profit = potentialReturn - stakeValue;
-                const winnerName =
-                  row.winnerSide === "away" ? row.awayTeam : row.homeTeam;
-                return (
-                  <TableRow key={row.id}>
-                    <TableCell>{formatDateDisplay(row.date)}</TableCell>
-                    <TableCell className="truncate">
-                      {row.homeTeam} vs {row.awayTeam}
+              betsTable.getRowModel().rows.map((row) => (
+                <TableRow key={row.id}>
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell
+                      key={cell.id}
+                      className={cn(
+                        getBetColumnWidthClass(cell.column.id),
+                        (cell.column.id === "fixture" || cell.column.id === "betOn") && "truncate"
+                      )}
+                    >
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
-                    <TableCell className="truncate text-emerald-600 dark:text-emerald-400">
-                      {winnerName}
-                    </TableCell>
-                    <TableCell>{row.odds}</TableCell>
-                    <TableCell>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={rowStakes[row.id] ?? defaultStake}
-                        onChange={(event) =>
-                          setRowStakes((prev) => ({
-                            ...prev,
-                            [row.id]: event.target.value,
-                          }))
-                        }
-                        className="h-8"
-                      />
-                    </TableCell>
-                    <TableCell>{potentialReturn.toFixed(2)}</TableCell>
-                    <TableCell>{profit.toFixed(2)}</TableCell>
-                    <TableCell>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={
-                          activeAccumulator?.matchIds.includes(row.id) ? "default" : "outline"
-                        }
-                        onClick={() => toggleMatchForActiveAccumulator(row)}
-                        disabled={
-                          Boolean(
-                            activeAccumulator?.day &&
-                              activeAccumulator.day !== row.date &&
-                              !activeAccumulator.matchIds.includes(row.id)
-                          )
-                        }
-                      >
-                        {activeAccumulator?.matchIds.includes(row.id) ? "Added" : "Add"}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
+                  ))}
+                </TableRow>
+              ))
             )}
           </TableBody>
         </Table>
@@ -685,78 +1161,155 @@ export function BetsCalculatorTable() {
                 <TableHead className="w-[10rem]">Combined Odds</TableHead>
                 <TableHead className="w-[10rem]">Return</TableHead>
                 <TableHead className="w-[10rem]">Profit</TableHead>
-                <TableHead className="w-[12rem]">Actions</TableHead>
+                <TableHead className="w-[4rem]">Note</TableHead>
+                <TableHead className="w-[10rem]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {accumulatorSummaries.map((summary) => (
-                <TableRow key={summary.id}>
-                  <TableCell>{summary.name}</TableCell>
-                  <TableCell>{summary.day ? formatDateDisplay(summary.day) : "-"}</TableCell>
-                  <TableCell>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={summary.stake}
-                      onChange={(event) =>
-                        setAccumulators((prev) =>
-                          prev.map((accumulator) =>
-                            accumulator.id === summary.id
-                              ? { ...accumulator, stake: event.target.value }
-                              : accumulator
-                          )
-                        )
-                      }
-                      className="h-8"
-                    />
+              {filteredAccumulatorSummaries.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} className="py-4 text-muted-foreground">
+                    No accumulators match this date filter.
                   </TableCell>
-                  <TableCell>{summary.matches.length}</TableCell>
-                  <TableCell>
-                    {summary.matches.length ? summary.combinedOdds.toFixed(2) : "0.00"}
-                  </TableCell>
-                  <TableCell>
-                    {summary.matches.length ? summary.potentialReturn.toFixed(2) : "0.00"}
-                  </TableCell>
-                  <TableCell>{summary.matches.length ? summary.profit.toFixed(2) : "0.00"}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
+                </TableRow>
+              ) : (
+                filteredAccumulatorSummaries.map((summary) => (
+                  <TableRow key={summary.id}>
+                    <TableCell>{accumulatorNameById[summary.id] ?? summary.name}</TableCell>
+                    <TableCell>{summary.day ? formatDateDisplay(summary.day) : "-"}</TableCell>
+                    <TableCell>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={summary.stake}
+                        onChange={(event) =>
                           setAccumulators((prev) =>
                             prev.map((accumulator) =>
                               accumulator.id === summary.id
-                                ? { ...accumulator, matchIds: [], day: null }
+                                ? { ...accumulator, stake: event.target.value }
                                 : accumulator
                             )
                           )
                         }
-                        disabled={summary.matches.length === 0}
+                        className="h-8"
+                      />
+                    </TableCell>
+                    <TableCell>{summary.matches.length}</TableCell>
+                    <TableCell>
+                      {summary.matches.length ? summary.combinedOdds.toFixed(2) : "0.00"}
+                    </TableCell>
+                    <TableCell>
+                      {summary.matches.length ? summary.potentialReturn.toFixed(2) : "0.00"}
+                    </TableCell>
+                    <TableCell>{summary.matches.length ? summary.profit.toFixed(2) : "0.00"}</TableCell>
+                    <TableCell>
+                      <Popover
+                        open={openNotePopoverId === summary.id}
+                        onOpenChange={(open) => {
+                          setOpenNotePopoverId(open ? summary.id : null);
+                        }}
                       >
-                        Clear
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => removeAccumulator(summary.id)}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                        <PopoverTrigger
+                          render={
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant={summary.note?.trim() ? "default" : "outline"}
+                            >
+                              <NotebookPenIcon className="size-4" />
+                              <span className="sr-only">Edit accumulator note</span>
+                            </Button>
+                          }
+                        />
+                        <PopoverContent align="end" className="w-80 p-3">
+                          <div className="space-y-2">
+                            <Label className="text-xs text-muted-foreground">
+                              {accumulatorNameById[summary.id] ?? summary.name} note
+                            </Label>
+                            <textarea
+                              value={noteDrafts[summary.id] ?? ""}
+                              onChange={(event) => {
+                                setSavedNoteId((current) =>
+                                  current === summary.id ? null : current
+                                );
+                                setNoteDrafts((prev) => ({
+                                  ...prev,
+                                  [summary.id]: event.target.value,
+                                }));
+                              }}
+                              placeholder="Add notes for this accumulator..."
+                              className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            />
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-muted-foreground">
+                                {savedNoteId === summary.id ? "Saved" : " "}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => clearAccumulatorNote(summary.id)}
+                                  disabled={
+                                    (noteDrafts[summary.id] ?? "").trim().length === 0 &&
+                                    (summary.note ?? "").trim().length === 0
+                                  }
+                                >
+                                  Clear
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() => saveAccumulatorNote(summary.id)}
+                                >
+                                  Save note
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setAccumulators((prev) =>
+                              prev.map((accumulator) =>
+                                accumulator.id === summary.id
+                                  ? { ...accumulator, matchIds: [], day: null }
+                                  : accumulator
+                              )
+                            )
+                          }
+                          disabled={summary.matches.length === 0}
+                        >
+                          Clear
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => removeAccumulator(summary.id)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
-          {accumulatorSummaries.some((summary) => summary.matches.length > 0) ? (
-            accumulatorSummaries.map((summary) =>
+          {filteredAccumulatorSummaries.some((summary) => summary.matches.length > 0) ? (
+            filteredAccumulatorSummaries.map((summary) =>
               summary.matches.length ? (
                 <p key={summary.id} className="text-xs text-muted-foreground">
-                  {summary.name}:{" "}
+                  {accumulatorNameById[summary.id] ?? summary.name}:{" "}
                   {summary.matches.map((row) => `${row.homeTeam} vs ${row.awayTeam}`).join(" | ")}
                 </p>
               ) : null
@@ -790,6 +1343,7 @@ function serializeBetsState(state: {
       stake: item.stake,
       matchIds: [...item.matchIds],
       day: item.day,
+      note: item.note,
     })),
     activeAccumulatorId: state.activeAccumulatorId,
   };
