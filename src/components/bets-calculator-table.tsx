@@ -29,6 +29,12 @@ import {
 import type { DateRange } from "react-day-picker";
 
 import { auth, db, isFirebaseConfigured } from "@/lib/firebase";
+import {
+  endOfDay,
+  formatDateDisplay,
+  formatDateForInput,
+  startOfDay,
+} from "@/lib/date-utils";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -53,24 +59,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { AccumulatorLike } from "@/types/domain/bets";
+import type { MatchBase } from "@/types/domain/match";
+import type { DateFilterMode } from "@/types/filters";
+import { buildAccumulatorName, serializeBetsState } from "@/components/bets/bets-utils";
 
-type MatchBet = {
-  id: string;
-  date: string;
-  homeTeam: string;
-  awayTeam: string;
-  winnerSide: "home" | "away";
-  odds: string;
-};
-
-type DailyAccumulator = {
-  id: string;
-  name: string;
-  stake: string;
-  matchIds: string[];
-  day: string | null;
-  note: string;
-};
+type MatchBet = MatchBase;
+type DailyAccumulator = AccumulatorLike & { note: string };
 
 const initialAccumulator: DailyAccumulator = {
   id: "acc-1",
@@ -80,54 +75,6 @@ const initialAccumulator: DailyAccumulator = {
   day: null,
   note: "",
 };
-
-function parseDateKey(value: string) {
-  const parts = value.split("-");
-  if (parts.length !== 3) {
-    return null;
-  }
-  const year = Number(parts[0]);
-  const month = Number(parts[1]);
-  const day = Number(parts[2]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
-    return null;
-  }
-  const parsed = new Date(year, month - 1, day);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function formatAccumulatorDateLabel(dayKey: string) {
-  const parsed = parseDateKey(dayKey) ?? new Date(dayKey);
-  if (Number.isNaN(parsed.getTime())) {
-    return dayKey;
-  }
-  const day = parsed.getDate();
-  const month = parsed.getMonth() + 1;
-  const year = parsed.getFullYear() % 100;
-  return `${day}/${month}/${year}`;
-}
-
-function buildAccumulatorName(dayKey: string, index: number) {
-  const dateLabel = formatAccumulatorDateLabel(dayKey);
-  return index === 1
-    ? `${dateLabel} Accumulator`
-    : `${dateLabel} Accumulator ${index}`;
-}
-
-function formatDateDisplay(value: string) {
-  if (!value) {
-    return "-";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toLocaleDateString(undefined, {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
 
 export function BetsCalculatorTable() {
   const [uid, setUid] = useState<string | null>(auth?.currentUser?.uid ?? null);
@@ -139,7 +86,7 @@ export function BetsCalculatorTable() {
   const [accumulatorError, setAccumulatorError] = useState<string | null>(null);
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
   const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
-  const [filterMode, setFilterMode] = useState<"date" | "range">("date");
+  const [filterMode, setFilterMode] = useState<DateFilterMode>("date");
   const [sorting, setSorting] = useState<SortingState>([]);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [savedNoteId, setSavedNoteId] = useState<string | null>(null);
@@ -361,13 +308,6 @@ export function BetsCalculatorTable() {
     return Number(rowStakes[rowId] ?? defaultStake) || 0;
   }
 
-  function formatDateForInput(date: Date) {
-    const year = date.getFullYear();
-    const month = `${date.getMonth() + 1}`.padStart(2, "0");
-    const day = `${date.getDate()}`.padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  }
-
   function parseStoredDate(value: string) {
     if (!value) {
       return null;
@@ -389,15 +329,6 @@ export function BetsCalculatorTable() {
     const fallback = new Date(value);
     return Number.isNaN(fallback.getTime()) ? null : fallback;
   }
-
-  function startOfDay(value: Date) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
-  }
-
-  function endOfDay(value: Date) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate(), 23, 59, 59, 999);
-  }
-
   function createAccumulator() {
     const seedDay = filterDateSeed ?? formatDateForInput(new Date());
     const nextIndex =
@@ -1325,27 +1256,3 @@ export function BetsCalculatorTable() {
   );
 }
 
-function serializeBetsState(state: {
-  defaultStake: string;
-  rowStakes: Record<string, string>;
-  accumulators: DailyAccumulator[];
-  activeAccumulatorId: string;
-}) {
-  const sortedRowStakes = Object.fromEntries(
-    Object.entries(state.rowStakes).sort(([a], [b]) => a.localeCompare(b))
-  );
-  const normalized = {
-    defaultStake: state.defaultStake,
-    rowStakes: sortedRowStakes,
-    accumulators: state.accumulators.map((item) => ({
-      id: item.id,
-      name: item.name,
-      stake: item.stake,
-      matchIds: [...item.matchIds],
-      day: item.day,
-      note: item.note,
-    })),
-    activeAccumulatorId: state.activeAccumulatorId,
-  };
-  return JSON.stringify(normalized);
-}

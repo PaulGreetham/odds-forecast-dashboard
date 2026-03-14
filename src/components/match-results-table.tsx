@@ -35,32 +35,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-
-type MatchResultRow = {
-  id: string;
-  date: string;
-  homeTeam: string;
-  awayTeam: string;
-  winnerSide: "home" | "away";
-  actualWinnerSide: "home" | "away" | "draw" | null;
-};
-
-function formatDateDisplay(value: string) {
-  if (!value) {
-    return "-";
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleDateString(undefined, {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
+import type { MatchResultRow } from "@/types/domain/match";
+import type { DateFilterMode } from "@/types/filters";
+import { endOfDay, formatDateDisplay, formatDateForInput, startOfDay } from "@/lib/date-utils";
 
 export function MatchResultsTable() {
   const [uid, setUid] = useState<string | null>(auth?.currentUser?.uid ?? null);
@@ -70,7 +47,7 @@ export function MatchResultsTable() {
   const [listenerError, setListenerError] = useState<string | null>(null);
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
   const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
-  const [filterMode, setFilterMode] = useState<"date" | "range">("date");
+  const [filterMode, setFilterMode] = useState<DateFilterMode>("date");
 
   const matchesCollection = useMemo(() => {
     if (!db || !uid) {
@@ -167,13 +144,6 @@ export function MatchResultsTable() {
     return row.actualWinnerSide === row.winnerSide ? "Successful" : "Unsuccessful";
   }
 
-  function formatDateForInput(date: Date) {
-    const year = date.getFullYear();
-    const month = `${date.getMonth() + 1}`.padStart(2, "0");
-    const day = `${date.getDate()}`.padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  }
-
   function parseStoredDate(value: string) {
     if (!value) {
       return null;
@@ -194,14 +164,6 @@ export function MatchResultsTable() {
 
     const fallback = new Date(value);
     return Number.isNaN(fallback.getTime()) ? null : fallback;
-  }
-
-  function startOfDay(value: Date) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
-  }
-
-  function endOfDay(value: Date) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate(), 23, 59, 59, 999);
   }
 
   const filteredRows = useMemo(() => {

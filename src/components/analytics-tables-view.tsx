@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
+import { useCallback, useMemo, useState } from "react";
 import {
   type ColumnDef,
   type SortingState,
@@ -13,7 +12,6 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
 import type { DateRange } from "react-day-picker";
 import {
   ArrowDownIcon,
@@ -24,7 +22,11 @@ import {
   XIcon,
 } from "lucide-react";
 
-import { auth, db, isFirebaseConfigured } from "@/lib/firebase";
+import { isFirebaseConfigured } from "@/lib/firebase";
+import { formatDateDisplay, formatDateForInput, parseDateKey } from "@/lib/date-utils";
+import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
+import { useBetsState } from "@/hooks/firebase/use-bets-state";
+import { useMatches } from "@/hooks/firebase/use-matches";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -41,214 +43,51 @@ import { Label } from "@/components/ui/label";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { AnalyticsAccumulatorTable } from "@/components/analytics-accumulator-table";
+import type { MatchInputRow } from "@/types/domain/match";
+import type { AccumulatorAnalyticsRow, AnalyticsTableRow } from "@/types/analytics";
+import type { DateFilterMode } from "@/types/filters";
 
-type MatchRow = {
-  id: string;
-  date: string;
-  homeTeam: string;
-  awayTeam: string;
-  competition: string;
-  country: string;
-  winnerPercent: string;
-  winnerSide: "home" | "away";
+type MatchRow = MatchInputRow & {
   actualWinnerSide: "home" | "away" | "draw" | null;
-  odds: string;
 };
-
-type PersistedAccumulator = {
-  id: string;
-  name: string;
-  stake: string;
-  matchIds: string[];
-  day: string | null;
-};
-
-type BetsState = {
-  defaultStake: string;
-  rowStakes: Record<string, string>;
-  accumulators: PersistedAccumulator[];
-};
-
-type AnalyticsTableRow = {
-  id: string;
-  date: string;
-  fixture: string;
-  competition: string;
-  country: string;
-  predictedWinner: string;
-  actualWinner: string;
-  outcome: "Win" | "Loss" | "Pending";
-  winPercent: number;
-  odds: number;
-  stake: number;
-  return: number;
-  profit: number;
-  accumulatorCount: number;
-};
-
-type AccumulatorAnalyticsRow = {
-  id: string;
-  name: string;
-  day: string | null;
-  games: number;
-  combinedOdds: number;
-  stake: number;
-  return: number;
-  profit: number;
-};
-
-function parseDateKey(value: string) {
-  const parts = value.split("-");
-  if (parts.length !== 3) {
-    return null;
-  }
-  const year = Number(parts[0]);
-  const month = Number(parts[1]);
-  const day = Number(parts[2]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
-    return null;
-  }
-  const parsed = new Date(year, month - 1, day);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function formatDateDisplay(value: string) {
-  const date = parseDateKey(value) ?? new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
-}
-
-function formatDateForInput(date: Date) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 function formatCurrency(value: number) {
   return `€${value.toFixed(2)}`;
 }
 
 export function AnalyticsTablesView() {
-  const [uid, setUid] = useState<string | null>(auth?.currentUser?.uid ?? null);
-  const [matches, setMatches] = useState<MatchRow[]>([]);
-  const [betsState, setBetsState] = useState<BetsState>({
-    defaultStake: "10",
-    rowStakes: {},
-    accumulators: [],
-  });
-  const [listenerError, setListenerError] = useState<string | null>(null);
+  const uid = useAuthUid();
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([{ id: "date", desc: true }]);
-  const [accumulatorSorting, setAccumulatorSorting] = useState<SortingState>([
-    { id: "day", desc: true },
-  ]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
-  const [filterMode, setFilterMode] = useState<"date" | "range">("date");
+  const [filterMode, setFilterMode] = useState<DateFilterMode>("date");
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
   const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
 
-  const matchesCollection = useMemo(() => {
-    if (!db || !uid) {
-      return null;
-    }
-    return collection(db, "users", uid, "matches");
-  }, [uid]);
-
-  const betsStateDoc = useMemo(() => {
-    if (!db || !uid) {
-      return null;
-    }
-    return doc(db, "users", uid, "appState", "bets");
-  }, [uid]);
-
-  useEffect(() => {
-    if (!auth) {
-      return;
-    }
-    const unsubscribe = onAuthStateChanged(auth, (user) => setUid(user?.uid ?? null));
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!matchesCollection) {
-      return;
-    }
-
-    const matchesQuery = query(matchesCollection, orderBy("date", "desc"));
-    const unsubscribe = onSnapshot(
-      matchesQuery,
-      (snapshot) => {
-        const next: MatchRow[] = snapshot.docs.map((item) => {
-          const data = item.data();
-          return {
-            id: item.id,
-            date: String(data.date ?? ""),
-            homeTeam: String(data.homeTeam ?? ""),
-            awayTeam: String(data.awayTeam ?? ""),
-            competition: String(data.competition ?? ""),
-            country: String(data.country ?? ""),
-            winnerPercent: String(data.winnerPercent ?? "0"),
-            winnerSide: data.winnerSide === "away" ? "away" : "home",
-            actualWinnerSide:
-              data.actualWinnerSide === "home" ||
-              data.actualWinnerSide === "away" ||
-              data.actualWinnerSide === "draw"
-                ? data.actualWinnerSide
-                : null,
-            odds: String(data.odds ?? "0"),
-          };
-        });
-        setMatches(next);
-        setListenerError(null);
-      },
-      () => setListenerError("Analytics table data could not be loaded due to Firestore permissions.")
-    );
-
-    return () => unsubscribe();
-  }, [matchesCollection]);
-
-  useEffect(() => {
-    if (!betsStateDoc) {
-      return;
-    }
-
-    const unsubscribe = onSnapshot(
-      betsStateDoc,
-      (snapshot) => {
-        if (!snapshot.exists()) {
-          setBetsState({ defaultStake: "10", rowStakes: {}, accumulators: [] });
-          return;
-        }
-        const data = snapshot.data();
-        setBetsState({
-          defaultStake: String(data.defaultStake ?? "10"),
-          rowStakes: Object.fromEntries(
-            Object.entries((data.rowStakes as Record<string, unknown>) ?? {}).map(([k, v]) => [
-              k,
-              String(v ?? ""),
-            ])
-          ),
-          accumulators: Array.isArray(data.accumulators)
-            ? (data.accumulators as Array<Record<string, unknown>>).map((acc, index) => ({
-                id: String(acc.id ?? `acc-${index + 1}`),
-                name: String(acc.name ?? `Accumulator ${index + 1}`),
-                stake: String(acc.stake ?? "0"),
-                matchIds: Array.isArray(acc.matchIds)
-                  ? acc.matchIds.map((matchId) => String(matchId))
-                  : [],
-                day: acc.day ? String(acc.day) : null,
-              }))
-            : [],
-        });
-      },
-      () => setListenerError("Bet state could not be loaded due to Firestore permissions.")
-    );
-
-    return () => unsubscribe();
-  }, [betsStateDoc]);
+  const mapMatch = useCallback(
+    (id: string, data: Record<string, unknown>): MatchRow => ({
+      id,
+      date: String(data.date ?? ""),
+      homeTeam: String(data.homeTeam ?? ""),
+      awayTeam: String(data.awayTeam ?? ""),
+      competition: String(data.competition ?? ""),
+      country: String(data.country ?? ""),
+      winnerPercent: String(data.winnerPercent ?? "0"),
+      winnerSide: data.winnerSide === "away" ? "away" : "home",
+      actualWinnerSide:
+        data.actualWinnerSide === "home" ||
+        data.actualWinnerSide === "away" ||
+        data.actualWinnerSide === "draw"
+          ? data.actualWinnerSide
+          : null,
+      odds: String(data.odds ?? "0"),
+    }),
+    []
+  );
+  const { rows: matches, error: matchesError } = useMatches(uid, mapMatch, "date", "desc");
+  const { betsState, error: betsStateError } = useBetsState(uid);
+  const listenerError = matchesError ?? betsStateError ?? null;
 
   const tableRows = useMemo<AnalyticsTableRow[]>(() => {
     const counts = new Map<string, number>();
@@ -555,56 +394,6 @@ export function AnalyticsTablesView() {
     },
   ];
 
-  const accumulatorColumns: ColumnDef<AccumulatorAnalyticsRow>[] = [
-    {
-      accessorKey: "name",
-      header: ({ column }) => sortHeader("Accumulator", column),
-    },
-    {
-      accessorKey: "day",
-      header: ({ column }) => sortHeader("Day", column),
-      cell: ({ row }) => (row.original.day ? formatDateDisplay(row.original.day) : "-"),
-      sortingFn: (a, b) => {
-        const aDay = a.original.day ?? "";
-        const bDay = b.original.day ?? "";
-        return aDay.localeCompare(bDay);
-      },
-    },
-    {
-      accessorKey: "games",
-      header: ({ column }) => sortHeader("Games", column),
-    },
-    {
-      accessorKey: "combinedOdds",
-      header: ({ column }) => sortHeader("Combined Odds", column),
-      cell: ({ row }) => row.original.combinedOdds.toFixed(2),
-    },
-    {
-      accessorKey: "stake",
-      header: ({ column }) => sortHeader("Stake", column),
-      cell: ({ row }) => formatCurrency(row.original.stake),
-    },
-    {
-      accessorKey: "return",
-      header: ({ column }) => sortHeader("Return", column),
-      cell: ({ row }) => formatCurrency(row.original.return),
-    },
-    {
-      accessorKey: "profit",
-      header: ({ column }) => sortHeader("Profit", column),
-      cell: ({ row }) => (
-        <span
-          className={cn(
-            row.original.profit >= 0
-              ? "text-emerald-600 dark:text-emerald-400"
-              : "text-red-600 dark:text-red-400"
-          )}
-        >
-          {formatCurrency(row.original.profit)}
-        </span>
-      ),
-    },
-  ];
 
   const table = useReactTable({
     data: dateFilteredRows,
@@ -633,15 +422,6 @@ export function AnalyticsTablesView() {
     initialState: {
       pagination: { pageSize: 15 },
     },
-  });
-
-  const accumulatorTable = useReactTable({
-    data: dateFilteredAccumulatorRows,
-    columns: accumulatorColumns,
-    state: { sorting: accumulatorSorting },
-    onSortingChange: setAccumulatorSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
   });
 
   return (
@@ -830,48 +610,7 @@ export function AnalyticsTablesView() {
           </Pagination>
         </div>
 
-        <div className="space-y-3 rounded-md border p-4">
-          <div>
-            <h3 className="text-sm font-medium">Accumulator Table</h3>
-            <p className="text-xs text-muted-foreground">
-              Accumulator-only performance for the current date filter.
-            </p>
-          </div>
-          <Table>
-            <TableHeader>
-              {accumulatorTable.getHeaderGroups().map((headerGroup) => (
-                <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => (
-                    <TableHead key={header.id}>
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(header.column.columnDef.header, header.getContext())}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {accumulatorTable.getRowModel().rows.length ? (
-                accumulatorTable.getRowModel().rows.map((row) => (
-                  <TableRow key={row.id}>
-                    {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={accumulatorColumns.length} className="py-4 text-muted-foreground">
-                    No accumulators found for this filter.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
+        <AnalyticsAccumulatorTable rows={dateFilteredAccumulatorRows} />
       </CardContent>
     </Card>
   );

@@ -1,8 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { collection, doc, onSnapshot, orderBy, query } from "firebase/firestore";
+import { useCallback, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -14,7 +12,9 @@ import {
 import { ChevronDownIcon, TrendingDownIcon, TrendingUpIcon } from "lucide-react";
 import type { DateRange } from "react-day-picker";
 
-import { auth, db } from "@/lib/firebase";
+import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
+import { useBetsState } from "@/hooks/firebase/use-bets-state";
+import { useMatches } from "@/hooks/firebase/use-matches";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -40,43 +40,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { formatDateDisplay, parseDateKey, toDateKey } from "@/lib/date-utils";
+import type { MatchBase } from "@/types/domain/match";
+import type { ChartRow, MetricsSummary } from "@/types/analytics";
+import type { RangeMode } from "@/types/filters";
 
-type MatchAnalyticsRow = {
-  id: string;
-  date: string;
-  odds: string;
-  winnerSide: "home" | "away";
+type MatchAnalyticsRow = Pick<MatchBase, "id" | "date" | "odds" | "winnerSide"> & {
   actualWinnerSide: "home" | "away" | "draw" | null;
-};
-
-type ChartRow = {
-  date: string;
-  spent: number;
-  received: number;
-};
-
-type RangeMode = "7d" | "30d" | "90d";
-
-type PersistedAccumulator = {
-  id: string;
-  stake: string;
-  matchIds: string[];
-  day: string | null;
-};
-
-type BetsState = {
-  defaultStake: string;
-  rowStakes: Record<string, string>;
-  accumulators: PersistedAccumulator[];
-};
-
-type MetricsSummary = {
-  spent: number;
-  received: number;
-  profit: number;
-  wins: number;
-  decided: number;
-  successPercent: number;
 };
 
 const chartConfig = {
@@ -89,43 +59,6 @@ const chartConfig = {
     color: "var(--chart-2)",
   },
 } satisfies ChartConfig;
-
-function parseDateKey(value: string) {
-  const parts = value.split("-");
-  if (parts.length !== 3) {
-    return null;
-  }
-
-  const year = Number(parts[0]);
-  const month = Number(parts[1]);
-  const day = Number(parts[2]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
-    return null;
-  }
-
-  const parsed = new Date(year, month - 1, day);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function toDateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function formatDateDisplay(value: string) {
-  const date = parseDateKey(value) ?? new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString(undefined, {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
 
 function formatDateTick(value: string) {
   const date = parseDateKey(value) ?? new Date(value);
@@ -188,123 +121,29 @@ function summarizeMetrics(chartRows: ChartRow[], matches: MatchAnalyticsRow[]): 
 }
 
 export function AnalyticsSpentReceivedChart() {
-  const [uid, setUid] = useState<string | null>(auth?.currentUser?.uid ?? null);
-  const [rows, setRows] = useState<MatchAnalyticsRow[]>([]);
-  const [betsState, setBetsState] = useState<BetsState>({
-    defaultStake: "10",
-    rowStakes: {},
-    accumulators: [],
-  });
+  const uid = useAuthUid();
   const [rangeMode, setRangeMode] = useState<RangeMode>("90d");
   const [metricFilterMode, setMetricFilterMode] = useState<"preset" | "range">("preset");
   const [metricRangeMode, setMetricRangeMode] = useState<RangeMode>("30d");
   const [metricDateRange, setMetricDateRange] = useState<DateRange | undefined>(undefined);
-  const [listenerError, setListenerError] = useState<string | null>(null);
-
-  const matchesCollection = useMemo(() => {
-    if (!db || !uid) {
-      return null;
-    }
-    return collection(db, "users", uid, "matches");
-  }, [uid]);
-
-  const betsStateDoc = useMemo(() => {
-    if (!db || !uid) {
-      return null;
-    }
-    return doc(db, "users", uid, "appState", "bets");
-  }, [uid]);
-
-  useEffect(() => {
-    if (!auth) {
-      return;
-    }
-
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUid(user?.uid ?? null);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!matchesCollection) {
-      return;
-    }
-
-    const matchesQuery = query(matchesCollection, orderBy("date", "asc"));
-    const unsubscribe = onSnapshot(
-      matchesQuery,
-      (snapshot) => {
-        const nextRows: MatchAnalyticsRow[] = snapshot.docs.map((item) => {
-          const data = item.data();
-          return {
-            id: item.id,
-            date: String(data.date ?? ""),
-            odds: String(data.odds ?? ""),
-            winnerSide: data.winnerSide === "away" ? "away" : "home",
-            actualWinnerSide:
-              data.actualWinnerSide === "home" ||
-              data.actualWinnerSide === "away" ||
-              data.actualWinnerSide === "draw"
-                ? data.actualWinnerSide
-                : null,
-          };
-        });
-        setRows(nextRows);
-        setListenerError(null);
-      },
-      () => {
-        setListenerError("Analytics data could not be loaded due to Firestore permissions.");
-      }
-    );
-
-    return () => unsubscribe();
-  }, [matchesCollection]);
-
-  useEffect(() => {
-    if (!betsStateDoc) {
-      return;
-    }
-
-    const unsubscribe = onSnapshot(
-      betsStateDoc,
-      (snapshot) => {
-        if (!snapshot.exists()) {
-          setBetsState({
-            defaultStake: "10",
-            rowStakes: {},
-            accumulators: [],
-          });
-          return;
-        }
-
-        const data = snapshot.data();
-        setBetsState({
-          defaultStake: String(data.defaultStake ?? "10"),
-          rowStakes: Object.fromEntries(
-            Object.entries((data.rowStakes as Record<string, unknown>) ?? {}).map(
-              ([key, value]) => [key, String(value ?? "")]
-            )
-          ),
-          accumulators: Array.isArray(data.accumulators)
-            ? (data.accumulators as Array<Record<string, unknown>>).map((acc, index) => ({
-                id: String(acc.id ?? `acc-${index + 1}`),
-                stake: String(acc.stake ?? "0"),
-                matchIds: Array.isArray(acc.matchIds)
-                  ? acc.matchIds.map((matchId) => String(matchId))
-                  : [],
-                day: acc.day ? String(acc.day) : null,
-              }))
-            : [],
-        });
-      },
-      () => {
-        setListenerError("Bets state could not be loaded due to Firestore permissions.");
-      }
-    );
-
-    return () => unsubscribe();
-  }, [betsStateDoc]);
+  const mapMatch = useCallback(
+    (id: string, data: Record<string, unknown>): MatchAnalyticsRow => ({
+      id,
+      date: String(data.date ?? ""),
+      odds: String(data.odds ?? ""),
+      winnerSide: data.winnerSide === "away" ? "away" : "home",
+      actualWinnerSide:
+        data.actualWinnerSide === "home" ||
+        data.actualWinnerSide === "away" ||
+        data.actualWinnerSide === "draw"
+          ? data.actualWinnerSide
+          : null,
+    }),
+    []
+  );
+  const { rows, error: matchesError } = useMatches(uid, mapMatch, "date", "asc");
+  const { betsState, error: betsStateError } = useBetsState(uid);
+  const listenerError = matchesError ?? betsStateError ?? null;
 
   const fullChartData = useMemo<ChartRow[]>(() => {
     const byDate = new Map<string, ChartRow>();
