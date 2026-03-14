@@ -299,6 +299,25 @@ export function AnalyticsTotalProfitAreaChart() {
     [chartData]
   );
 
+  const yDomain = useMemo<[number, number]>(() => {
+    if (!chartData.length) {
+      return [-1, 1];
+    }
+    const values = chartData
+      .map((row) => row.profit)
+      .filter((value) => Number.isFinite(value));
+    if (!values.length) {
+      return [-1, 1];
+    }
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const padding =
+      min === max
+        ? Math.max(1, Math.abs(min) * 0.1)
+        : Math.max(1, (max - min) * 0.1);
+    return [min - padding, max + padding];
+  }, [chartData]);
+
   const rangeLabel =
     rangeMode === "90d"
       ? "Last 3 months"
@@ -370,7 +389,9 @@ export function AnalyticsTotalProfitAreaChart() {
               <YAxis
                 tickLine={false}
                 axisLine={false}
-                domain={[(min: number) => min - 2, (max: number) => max + 2]}
+                width={90}
+                domain={yDomain}
+                tickFormatter={(value) => formatCurrency(Number(value))}
               />
               <ChartTooltip
                 cursor={false}

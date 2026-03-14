@@ -80,10 +80,21 @@ type AnalyticsTableRow = {
   outcome: "Win" | "Loss" | "Pending";
   winPercent: number;
   odds: number;
-  singleStake: number;
-  singleReturn: number;
-  singleProfit: number;
+  stake: number;
+  return: number;
+  profit: number;
   accumulatorCount: number;
+};
+
+type AccumulatorAnalyticsRow = {
+  id: string;
+  name: string;
+  day: string | null;
+  games: number;
+  combinedOdds: number;
+  stake: number;
+  return: number;
+  profit: number;
 };
 
 function parseDateKey(value: string) {
@@ -131,6 +142,9 @@ export function AnalyticsTablesView() {
   const [listenerError, setListenerError] = useState<string | null>(null);
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([{ id: "date", desc: true }]);
+  const [accumulatorSorting, setAccumulatorSorting] = useState<SortingState>([
+    { id: "day", desc: true },
+  ]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [filterMode, setFilterMode] = useState<"date" | "range">("date");
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
@@ -238,9 +252,52 @@ export function AnalyticsTablesView() {
 
   const tableRows = useMemo<AnalyticsTableRow[]>(() => {
     const counts = new Map<string, number>();
+    const accumulatorContrib = new Map<string, { stake: number; return: number; profit: number }>();
+    const matchesById = new Map(matches.map((row) => [row.id, row]));
+
     betsState.accumulators.forEach((acc) => {
       acc.matchIds.forEach((matchId) => {
         counts.set(matchId, (counts.get(matchId) ?? 0) + 1);
+      });
+    });
+
+    betsState.accumulators.forEach((acc) => {
+      const stakeValue = Number(acc.stake);
+      if (!Number.isFinite(stakeValue) || stakeValue <= 0 || !acc.matchIds.length) {
+        return;
+      }
+
+      const selected = acc.matchIds
+        .map((id) => matchesById.get(id))
+        .filter((item): item is MatchRow => Boolean(item));
+      if (!selected.length) {
+        return;
+      }
+
+      let allWon = true;
+      let combinedOdds = 1;
+      selected.forEach((match) => {
+        const oddsValue = Number(match.odds);
+        const won = match.actualWinnerSide !== null && match.actualWinnerSide === match.winnerSide;
+        if (!won || !Number.isFinite(oddsValue) || oddsValue <= 0) {
+          allWon = false;
+          return;
+        }
+        combinedOdds *= oddsValue;
+      });
+
+      const totalReturn = allWon ? stakeValue * combinedOdds : 0;
+      const shareStake = stakeValue / selected.length;
+      const shareReturn = totalReturn / selected.length;
+      const shareProfit = shareReturn - shareStake;
+
+      selected.forEach((match) => {
+        const prev = accumulatorContrib.get(match.id) ?? { stake: 0, return: 0, profit: 0 };
+        accumulatorContrib.set(match.id, {
+          stake: prev.stake + shareStake,
+          return: prev.return + shareReturn,
+          profit: prev.profit + shareProfit,
+        });
       });
     });
 
@@ -268,6 +325,7 @@ export function AnalyticsTablesView() {
       ) || 0;
       const singleReturn = outcome === "Win" ? singleStake * odds : 0;
       const singleProfit = singleReturn - singleStake;
+      const acc = accumulatorContrib.get(row.id) ?? { stake: 0, return: 0, profit: 0 };
 
       return {
         id: row.id,
@@ -280,9 +338,9 @@ export function AnalyticsTablesView() {
         outcome,
         winPercent: Number(row.winnerPercent) || 0,
         odds,
-        singleStake,
-        singleReturn,
-        singleProfit,
+        stake: singleStake + acc.stake,
+        return: singleReturn + acc.return,
+        profit: singleProfit + acc.profit,
         accumulatorCount: counts.get(row.id) ?? 0,
       };
     });
@@ -329,6 +387,87 @@ export function AnalyticsTablesView() {
       return true;
     });
   }, [filterDate, filterDateRange, filterMode, tableRows]);
+
+  const accumulatorRows = useMemo<AccumulatorAnalyticsRow[]>(() => {
+    const matchesById = new Map(matches.map((row) => [row.id, row]));
+
+    return betsState.accumulators.map((accumulator, index) => {
+      const selected = accumulator.matchIds
+        .map((matchId) => matchesById.get(matchId))
+        .filter((item): item is MatchRow => Boolean(item));
+
+      let allWon = true;
+      let combinedOdds = 1;
+      selected.forEach((match) => {
+        const oddsValue = Number(match.odds);
+        const won = match.actualWinnerSide !== null && match.actualWinnerSide === match.winnerSide;
+        if (!won || !Number.isFinite(oddsValue) || oddsValue <= 0) {
+          allWon = false;
+          return;
+        }
+        combinedOdds *= oddsValue;
+      });
+
+      const stake = Number(accumulator.stake) || 0;
+      const potentialReturn = selected.length && allWon ? stake * combinedOdds : 0;
+
+      return {
+        id: accumulator.id,
+        name: accumulator.name || `Accumulator ${index + 1}`,
+        day: accumulator.day,
+        games: selected.length,
+        combinedOdds: selected.length ? combinedOdds : 0,
+        stake,
+        return: potentialReturn,
+        profit: potentialReturn - stake,
+      };
+    });
+  }, [betsState.accumulators, matches]);
+
+  const dateFilteredAccumulatorRows = useMemo(() => {
+    if (filterMode === "date" && !filterDate) {
+      return accumulatorRows;
+    }
+    if (filterMode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
+      return accumulatorRows;
+    }
+
+    return accumulatorRows.filter((row) => {
+      if (!row.day) {
+        return false;
+      }
+      const rowDate = parseDateKey(row.day);
+      if (!rowDate) {
+        return false;
+      }
+
+      if (filterMode === "date" && filterDate) {
+        return row.day === formatDateForInput(filterDate);
+      }
+
+      if (filterMode === "range" && (filterDateRange?.from || filterDateRange?.to)) {
+        const from = filterDateRange?.from
+          ? new Date(
+              filterDateRange.from.getFullYear(),
+              filterDateRange.from.getMonth(),
+              filterDateRange.from.getDate()
+            )
+          : null;
+        const toRaw = filterDateRange?.to ?? filterDateRange?.from ?? null;
+        const to = toRaw
+          ? new Date(toRaw.getFullYear(), toRaw.getMonth(), toRaw.getDate(), 23, 59, 59, 999)
+          : null;
+        if (from && rowDate < from) {
+          return false;
+        }
+        if (to && rowDate > to) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [accumulatorRows, filterDate, filterDateRange, filterMode]);
 
   function sortHeader(
     label: string,
@@ -386,33 +525,84 @@ export function AnalyticsTablesView() {
     },
     { accessorKey: "odds", header: ({ column }) => sortHeader("Odds", column), cell: ({ row }) => row.original.odds.toFixed(2) },
     {
-      accessorKey: "singleStake",
+      accessorKey: "stake",
       header: ({ column }) => sortHeader("Stake", column),
-      cell: ({ row }) => formatCurrency(row.original.singleStake),
+      cell: ({ row }) => formatCurrency(row.original.stake),
     },
     {
-      accessorKey: "singleReturn",
+      accessorKey: "return",
       header: ({ column }) => sortHeader("Return", column),
-      cell: ({ row }) => formatCurrency(row.original.singleReturn),
+      cell: ({ row }) => formatCurrency(row.original.return),
     },
     {
-      accessorKey: "singleProfit",
+      accessorKey: "profit",
       header: ({ column }) => sortHeader("Profit", column),
       cell: ({ row }) => (
         <span
           className={cn(
-            row.original.singleProfit >= 0
+            row.original.profit >= 0
               ? "text-emerald-600 dark:text-emerald-400"
               : "text-red-600 dark:text-red-400"
           )}
         >
-          {formatCurrency(row.original.singleProfit)}
+          {formatCurrency(row.original.profit)}
         </span>
       ),
     },
     {
       accessorKey: "accumulatorCount",
       header: ({ column }) => sortHeader("Accumulators", column),
+    },
+  ];
+
+  const accumulatorColumns: ColumnDef<AccumulatorAnalyticsRow>[] = [
+    {
+      accessorKey: "name",
+      header: ({ column }) => sortHeader("Accumulator", column),
+    },
+    {
+      accessorKey: "day",
+      header: ({ column }) => sortHeader("Day", column),
+      cell: ({ row }) => (row.original.day ? formatDateDisplay(row.original.day) : "-"),
+      sortingFn: (a, b) => {
+        const aDay = a.original.day ?? "";
+        const bDay = b.original.day ?? "";
+        return aDay.localeCompare(bDay);
+      },
+    },
+    {
+      accessorKey: "games",
+      header: ({ column }) => sortHeader("Games", column),
+    },
+    {
+      accessorKey: "combinedOdds",
+      header: ({ column }) => sortHeader("Combined Odds", column),
+      cell: ({ row }) => row.original.combinedOdds.toFixed(2),
+    },
+    {
+      accessorKey: "stake",
+      header: ({ column }) => sortHeader("Stake", column),
+      cell: ({ row }) => formatCurrency(row.original.stake),
+    },
+    {
+      accessorKey: "return",
+      header: ({ column }) => sortHeader("Return", column),
+      cell: ({ row }) => formatCurrency(row.original.return),
+    },
+    {
+      accessorKey: "profit",
+      header: ({ column }) => sortHeader("Profit", column),
+      cell: ({ row }) => (
+        <span
+          className={cn(
+            row.original.profit >= 0
+              ? "text-emerald-600 dark:text-emerald-400"
+              : "text-red-600 dark:text-red-400"
+          )}
+        >
+          {formatCurrency(row.original.profit)}
+        </span>
+      ),
     },
   ];
 
@@ -443,6 +633,15 @@ export function AnalyticsTablesView() {
     initialState: {
       pagination: { pageSize: 15 },
     },
+  });
+
+  const accumulatorTable = useReactTable({
+    data: dateFilteredAccumulatorRows,
+    columns: accumulatorColumns,
+    state: { sorting: accumulatorSorting },
+    onSortingChange: setAccumulatorSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
   });
 
   return (
@@ -629,6 +828,49 @@ export function AnalyticsTablesView() {
               </PaginationItem>
             </PaginationContent>
           </Pagination>
+        </div>
+
+        <div className="space-y-3 rounded-md border p-4">
+          <div>
+            <h3 className="text-sm font-medium">Accumulator Table</h3>
+            <p className="text-xs text-muted-foreground">
+              Accumulator-only performance for the current date filter.
+            </p>
+          </div>
+          <Table>
+            <TableHeader>
+              {accumulatorTable.getHeaderGroups().map((headerGroup) => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <TableHead key={header.id}>
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
+            </TableHeader>
+            <TableBody>
+              {accumulatorTable.getRowModel().rows.length ? (
+                accumulatorTable.getRowModel().rows.map((row) => (
+                  <TableRow key={row.id}>
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id}>
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={accumulatorColumns.length} className="py-4 text-muted-foreground">
+                    No accumulators found for this filter.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </div>
       </CardContent>
     </Card>
