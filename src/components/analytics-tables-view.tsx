@@ -40,7 +40,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AnalyticsAccumulatorTable } from "@/components/analytics-accumulator-table";
@@ -590,11 +598,31 @@ export function AnalyticsTablesView() {
                   className={!table.getCanPreviousPage() ? "pointer-events-none opacity-50" : ""}
                 />
               </PaginationItem>
-              <PaginationItem>
-                <PaginationLink href="#" isActive>
-                  {table.getState().pagination.pageIndex + 1}
-                </PaginationLink>
-              </PaginationItem>
+              {Array.from({ length: table.getPageCount() }, (_, index) => index)
+                .slice(
+                  Math.max(0, table.getState().pagination.pageIndex - 1),
+                  Math.min(table.getPageCount(), table.getState().pagination.pageIndex + 2)
+                )
+                .map((pageIndex) => (
+                  <PaginationItem key={pageIndex}>
+                    <PaginationLink
+                      href="#"
+                      isActive={table.getState().pagination.pageIndex === pageIndex}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        table.setPageIndex(pageIndex);
+                      }}
+                    >
+                      {pageIndex + 1}
+                    </PaginationLink>
+                  </PaginationItem>
+                ))}
+              {table.getPageCount() > 3 &&
+              table.getState().pagination.pageIndex < table.getPageCount() - 2 ? (
+                <PaginationItem>
+                  <PaginationEllipsis />
+                </PaginationItem>
+              ) : null}
               <PaginationItem>
                 <PaginationNext
                   href="#"
