@@ -343,6 +343,10 @@ export function AnalyticsSpentReceivedChart() {
     return sequence;
   }, [fullChartData, rangeMode]);
   const metricData = chartData.filter((row) => row.spent > 0 || row.received > 0);
+  const bettingDayRows = useMemo(
+    () => chartData.filter((row) => row.spent > 0),
+    [chartData]
+  );
   const displayChartData = useMemo(() => {
     if (chartViewMode === "daily") {
       return chartData;
@@ -404,9 +408,9 @@ export function AnalyticsSpentReceivedChart() {
     const totalBets = singlesCount + accumulatorsCount;
     const averageProfitPerBet = totalBets > 0 ? topSummary.profit / totalBets : 0;
 
-    const dailyReturns = metricData
-      .filter((row) => row.spent > 0)
-      .map((row) => ((row.received - row.spent) / row.spent) * 100);
+    const dailyReturns = bettingDayRows.map(
+      (row) => ((row.received - row.spent) / row.spent) * 100
+    );
 
     const dailyReturnAverage =
       dailyReturns.length > 0
@@ -421,8 +425,17 @@ export function AnalyticsSpentReceivedChart() {
       bestDailyReturn,
       worstDailyReturn,
       totalBets,
+      bettingDays: bettingDayRows.length,
     };
-  }, [betsState.accumulators, betsState.defaultStake, betsState.rowStakes, metricData, rows, topSummary.profit]);
+  }, [
+    betsState.accumulators,
+    betsState.defaultStake,
+    betsState.rowStakes,
+    bettingDayRows,
+    metricData,
+    rows,
+    topSummary.profit,
+  ]);
 
   const rangeLabel =
     rangeMode === "7d"
@@ -551,8 +564,10 @@ export function AnalyticsSpentReceivedChart() {
                 </CardTitle>
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                <div className="line-clamp-1 flex gap-2 font-medium">Mean daily ROI</div>
-                <div className="text-muted-foreground">Average of daily return percentages</div>
+                <div className="line-clamp-1 flex gap-2 font-medium">
+                  Mean daily ROI ({topExtendedMetrics.bettingDays} betting days)
+                </div>
+                <div className="text-muted-foreground">Only days with stake placed are included</div>
               </CardFooter>
             </Card>
 
@@ -565,7 +580,7 @@ export function AnalyticsSpentReceivedChart() {
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
                 <div className="line-clamp-1 flex gap-2 font-medium">Highest day in range</div>
-                <div className="text-muted-foreground">Based on (received - spent) / spent</div>
+                <div className="text-muted-foreground">Only days with stake placed are included</div>
               </CardFooter>
             </Card>
 
@@ -578,9 +593,7 @@ export function AnalyticsSpentReceivedChart() {
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
                 <div className="line-clamp-1 flex gap-2 font-medium">Lowest day in range</div>
-                <div className="text-muted-foreground">
-                  Based on (received - spent) / spent
-                </div>
+                <div className="text-muted-foreground">Only days with stake placed are included</div>
               </CardFooter>
             </Card>
           </div>

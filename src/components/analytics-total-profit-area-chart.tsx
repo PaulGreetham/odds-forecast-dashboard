@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Area, AreaChart, CartesianGrid, Legend, XAxis, YAxis } from "recharts";
+import { Area, CartesianGrid, ComposedChart, Legend, Line, XAxis, YAxis } from "recharts";
 import { ChevronDownIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,10 @@ const chartConfig = {
   profit: {
     label: "Total Profit",
     color: "var(--chart-3)",
+  },
+  runningAverage: {
+    label: "Daily Avg",
+    color: "#f59e0b",
   },
 } satisfies ChartConfig;
 
@@ -166,6 +170,16 @@ export function AnalyticsTotalProfitAreaChart() {
     () => chartData.reduce((sum, row) => sum + row.profit, 0),
     [chartData]
   );
+  const chartDataWithAverage = useMemo(() => {
+    let runningTotal = 0;
+    return chartData.map((row, index) => {
+      runningTotal += row.profit;
+      return {
+        ...row,
+        runningAverage: runningTotal / (index + 1),
+      };
+    });
+  }, [chartData]);
 
   const yDomain = useMemo<[number, number]>(() => {
     if (!chartData.length) {
@@ -230,8 +244,8 @@ export function AnalyticsTotalProfitAreaChart() {
           </p>
         ) : (
           <ChartContainer config={chartConfig} className="aspect-auto h-[360px] w-full">
-            <AreaChart
-              data={chartData}
+            <ComposedChart
+              data={chartDataWithAverage}
               margin={{
                 left: 8,
                 right: 16,
@@ -279,7 +293,16 @@ export function AnalyticsTotalProfitAreaChart() {
                 isAnimationActive
                 animationDuration={700}
               />
-            </AreaChart>
+              <Line
+                dataKey="runningAverage"
+                type="monotone"
+                stroke="var(--color-runningAverage)"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive
+                animationDuration={700}
+              />
+            </ComposedChart>
           </ChartContainer>
         )}
       </CardContent>
