@@ -38,6 +38,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { NumberTicker } from "@/components/ui/number-ticker";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { formatDateDisplay, parseDateKey, toDateKey } from "@/lib/date-utils";
@@ -85,6 +86,28 @@ function formatDeltaCurrency(value: number) {
 function formatDeltaPercentPoints(value: number) {
   const sign = value >= 0 ? "+" : "-";
   return `${sign}${Math.abs(value).toFixed(1)}pp`;
+}
+
+function CurrencyTicker({ value }: { value: number }) {
+  const sign = value < 0 ? "-" : "";
+  return (
+    <>
+      {sign}€
+      <NumberTicker
+        value={Math.abs(value)}
+        decimalPlaces={2}
+        className="tracking-normal"
+      />
+    </>
+  );
+}
+
+function PercentTicker({ value }: { value: number }) {
+  return (
+    <>
+      <NumberTicker value={value} decimalPlaces={1} className="tracking-normal" />%
+    </>
+  );
 }
 
 function filterChartRowsByBounds(rows: ChartRow[], start: Date, end: Date) {
@@ -515,7 +538,7 @@ export function AnalyticsSpentReceivedChart() {
               <CardHeader>
                 <CardDescription>Total Profit</CardDescription>
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  {formatCurrency(topSummary.profit)}
+                  <CurrencyTicker value={topSummary.profit} />
                 </CardTitle>
                 <CardAction>
                   {topDeltas.profit >= 0 ? (
@@ -543,7 +566,7 @@ export function AnalyticsSpentReceivedChart() {
               <CardHeader>
                 <CardDescription>Total % Win</CardDescription>
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  {topSummary.successPercent.toFixed(1)}%
+                  <PercentTicker value={topSummary.successPercent} />
                 </CardTitle>
                 <CardAction>
                   {topDeltas.success >= 0 ? (
@@ -571,7 +594,7 @@ export function AnalyticsSpentReceivedChart() {
               <CardHeader>
                 <CardDescription>Total Spent</CardDescription>
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  {formatCurrency(topSummary.spent)}
+                  <CurrencyTicker value={topSummary.spent} />
                 </CardTitle>
                 <CardAction>
                   {topDeltas.spent >= 0 ? (
@@ -597,7 +620,7 @@ export function AnalyticsSpentReceivedChart() {
               <CardHeader>
                 <CardDescription>Total Received</CardDescription>
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  {formatCurrency(topSummary.received)}
+                  <CurrencyTicker value={topSummary.received} />
                 </CardTitle>
                 <CardAction>
                   {topDeltas.received >= 0 ? (
@@ -730,7 +753,7 @@ export function AnalyticsSpentReceivedChart() {
                 <CardHeader>
                   <CardDescription>Profit</CardDescription>
                   <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                    {formatCurrency(chartSummary.profit)}
+                    <CurrencyTicker value={chartSummary.profit} />
                   </CardTitle>
                   <CardAction>
                     {chartDeltas.profit >= 0 ? (
@@ -758,7 +781,7 @@ export function AnalyticsSpentReceivedChart() {
                 <CardHeader>
                   <CardDescription>Spent</CardDescription>
                   <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                    {formatCurrency(chartSummary.spent)}
+                    <CurrencyTicker value={chartSummary.spent} />
                   </CardTitle>
                   <CardAction>
                     {chartDeltas.spent >= 0 ? (
@@ -784,7 +807,7 @@ export function AnalyticsSpentReceivedChart() {
                 <CardHeader>
                   <CardDescription>Received</CardDescription>
                   <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                    {formatCurrency(chartSummary.received)}
+                    <CurrencyTicker value={chartSummary.received} />
                   </CardTitle>
                   <CardAction>
                     {chartDeltas.received >= 0 ? (
@@ -814,7 +837,7 @@ export function AnalyticsSpentReceivedChart() {
                 <CardHeader>
                   <CardDescription>% Win</CardDescription>
                   <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                    {chartSummary.successPercent.toFixed(1)}%
+                    <PercentTicker value={chartSummary.successPercent} />
                   </CardTitle>
                   <CardAction>
                     {chartDeltas.success >= 0 ? (
