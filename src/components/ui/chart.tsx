@@ -85,6 +85,7 @@ type ChartTooltipContentProps = {
     payload: TooltipItem[],
     rawPayload: unknown
   ) => React.ReactNode;
+  extraRows?: (payload: TooltipItem[]) => React.ReactNode;
 };
 
 export function ChartTooltipContent({
@@ -95,6 +96,7 @@ export function ChartTooltipContent({
   label,
   labelFormatter,
   formatter,
+  extraRows,
 }: ChartTooltipContentProps) {
   const { config } = useChart();
 
@@ -137,6 +139,7 @@ export function ChartTooltipContent({
             </div>
           );
         })}
+        {extraRows ? extraRows(payload) : null}
       </div>
     </div>
   );

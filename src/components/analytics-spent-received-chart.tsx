@@ -9,17 +9,14 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ChevronDownIcon, TrendingDownIcon, TrendingUpIcon } from "lucide-react";
-import type { DateRange } from "react-day-picker";
+import { ChevronDownIcon } from "lucide-react";
 
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { useBetsState } from "@/hooks/firebase/use-bets-state";
 import { useMatches } from "@/hooks/firebase/use-matches";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -39,16 +36,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { NumberTicker } from "@/components/ui/number-ticker";
-import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { formatDateDisplay, parseDateKey, toDateKey } from "@/lib/date-utils";
 import type { MatchBase } from "@/types/domain/match";
 import type { ChartRow, MetricsSummary } from "@/types/analytics";
-import type { RangeMode } from "@/types/filters";
 
 type MatchAnalyticsRow = Pick<MatchBase, "id" | "date" | "odds" | "winnerSide"> & {
   actualWinnerSide: "home" | "away" | "draw" | null;
 };
+
+type MetricsRangeMode = "7d" | "30d" | "90d" | "180d" | "365d" | "all";
+type ChartViewMode = "daily" | "weekly" | "monthly" | "quarterly";
 
 const chartConfig = {
   spent: {
@@ -73,19 +70,71 @@ function formatDateTick(value: string) {
   });
 }
 
+function getStartOfWeek(date: Date) {
+  const start = new Date(date);
+  const day = start.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  start.setDate(start.getDate() + diff);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function getBucketStart(date: Date, viewMode: ChartViewMode) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  if (viewMode === "weekly") {
+    return getStartOfWeek(d);
+  }
+  if (viewMode === "monthly") {
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  }
+  if (viewMode === "quarterly") {
+    const quarterStartMonth = Math.floor(d.getMonth() / 3) * 3;
+    return new Date(d.getFullYear(), quarterStartMonth, 1);
+  }
+  return d;
+}
+
+function formatBucketTick(value: string, viewMode: ChartViewMode) {
+  const date = parseDateKey(value);
+  if (!date) {
+    return value;
+  }
+  if (viewMode === "daily") {
+    return formatDateTick(value);
+  }
+  if (viewMode === "weekly") {
+    return `Wk ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+  }
+  if (viewMode === "monthly") {
+    return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+  }
+  return `Q${Math.floor(date.getMonth() / 3) + 1} '${String(date.getFullYear()).slice(-2)}`;
+}
+
+function formatBucketTooltip(value: string, viewMode: ChartViewMode) {
+  const start = parseDateKey(value);
+  if (!start) {
+    return String(value);
+  }
+  if (viewMode === "daily") {
+    return formatDateDisplay(value);
+  }
+  if (viewMode === "weekly") {
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return `${formatDateDisplay(toDateKey(start))} - ${formatDateDisplay(toDateKey(end))}`;
+  }
+  if (viewMode === "monthly") {
+    return start.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  }
+  const quarter = Math.floor(start.getMonth() / 3) + 1;
+  return `Q${quarter} ${start.getFullYear()}`;
+}
+
 function formatCurrency(value: number) {
   const sign = value < 0 ? "-" : "";
   return `${sign}€${Math.abs(value).toFixed(2)}`;
-}
-
-function formatDeltaCurrency(value: number) {
-  const sign = value >= 0 ? "+" : "-";
-  return `${sign}€${Math.abs(value).toFixed(2)}`;
-}
-
-function formatDeltaPercentPoints(value: number) {
-  const sign = value >= 0 ? "+" : "-";
-  return `${sign}${Math.abs(value).toFixed(1)}pp`;
 }
 
 function CurrencyTicker({ value }: { value: number }) {
@@ -145,10 +194,8 @@ function summarizeMetrics(chartRows: ChartRow[], matches: MatchAnalyticsRow[]): 
 
 export function AnalyticsSpentReceivedChart() {
   const uid = useAuthUid();
-  const [rangeMode, setRangeMode] = useState<RangeMode>("90d");
-  const [metricFilterMode, setMetricFilterMode] = useState<"preset" | "range">("preset");
-  const [metricRangeMode, setMetricRangeMode] = useState<RangeMode>("30d");
-  const [metricDateRange, setMetricDateRange] = useState<DateRange | undefined>(undefined);
+  const [rangeMode, setRangeMode] = useState<MetricsRangeMode>("30d");
+  const [chartViewMode, setChartViewMode] = useState<ChartViewMode>("daily");
   const mapMatch = useCallback(
     (id: string, data: Record<string, unknown>): MatchAnalyticsRow => ({
       id,
@@ -256,183 +303,139 @@ export function AnalyticsSpentReceivedChart() {
   }, [betsState, rows]);
 
   const chartData = useMemo(() => {
-    const days = rangeMode === "7d" ? 7 : rangeMode === "30d" ? 30 : 90;
+    const daysByMode: Record<Exclude<MetricsRangeMode, "all">, number> = {
+      "7d": 7,
+      "30d": 30,
+      "90d": 90,
+      "180d": 180,
+      "365d": 365,
+    };
     const maxDate = fullChartData.at(-1)?.date;
     const endDate = maxDate ? parseDateKey(maxDate) : null;
     if (!endDate) {
       return [];
     }
 
+    const startDate =
+      rangeMode === "all"
+        ? (parseDateKey(fullChartData[0]?.date ?? "") ?? endDate)
+        : (() => {
+            const start = new Date(endDate);
+            start.setDate(endDate.getDate() - (daysByMode[rangeMode] - 1));
+            return start;
+          })();
+
     const byDate = new Map(fullChartData.map((row) => [row.date, row]));
     const sequence: ChartRow[] = [];
+    const current = new Date(startDate);
 
-    for (let offset = days - 1; offset >= 0; offset -= 1) {
-      const current = new Date(endDate);
-      current.setDate(endDate.getDate() - offset);
+    while (current <= endDate) {
       const key = toDateKey(current);
-      const existing = byDate.get(key);
-      sequence.push(
-        existing ?? {
-          date: key,
-          spent: 0,
-          received: 0,
-        }
-      );
+      const existing = byDate.get(key) ?? {
+        date: key,
+        spent: 0,
+        received: 0,
+      };
+      sequence.push(existing);
+      current.setDate(current.getDate() + 1);
     }
 
     return sequence;
   }, [fullChartData, rangeMode]);
-
-  const metricData = useMemo(() => {
-    if (metricFilterMode === "preset") {
-      const days = metricRangeMode === "7d" ? 7 : metricRangeMode === "30d" ? 30 : 90;
-      const maxDate = fullChartData.at(-1)?.date;
-      const endDate = maxDate ? parseDateKey(maxDate) : null;
-      if (!endDate) {
-        return [];
-      }
-      const startDate = new Date(endDate);
-      startDate.setDate(endDate.getDate() - (days - 1));
-      return fullChartData.filter((row) => {
-        const date = parseDateKey(row.date);
-        return Boolean(date && date >= startDate && date <= endDate);
-      });
+  const metricData = chartData.filter((row) => row.spent > 0 || row.received > 0);
+  const displayChartData = useMemo(() => {
+    if (chartViewMode === "daily") {
+      return chartData;
     }
-
-    if (!metricDateRange?.from && !metricDateRange?.to) {
-      return fullChartData;
-    }
-
-    const from = metricDateRange.from
-      ? new Date(
-          metricDateRange.from.getFullYear(),
-          metricDateRange.from.getMonth(),
-          metricDateRange.from.getDate()
-        )
-      : null;
-    const toRaw = metricDateRange.to ?? metricDateRange.from ?? null;
-    const to = toRaw
-      ? new Date(toRaw.getFullYear(), toRaw.getMonth(), toRaw.getDate(), 23, 59, 59, 999)
-      : null;
-
-    return fullChartData.filter((row) => {
-      const date = parseDateKey(row.date);
-      if (!date) {
-        return false;
+    const bucketMap = new Map<string, ChartRow>();
+    chartData.forEach((row) => {
+      const parsedDate = parseDateKey(row.date);
+      if (!parsedDate) {
+        return;
       }
-      if (from && date < from) {
-        return false;
-      }
-      if (to && date > to) {
-        return false;
-      }
-      return true;
+      const bucketStart = getBucketStart(parsedDate, chartViewMode);
+      const bucketKey = toDateKey(bucketStart);
+      const existing = bucketMap.get(bucketKey) ?? { date: bucketKey, spent: 0, received: 0 };
+      existing.spent += row.spent;
+      existing.received += row.received;
+      bucketMap.set(bucketKey, existing);
     });
-  }, [fullChartData, metricDateRange, metricFilterMode, metricRangeMode]);
+    return Array.from(bucketMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+  }, [chartData, chartViewMode]);
 
   const topSummary = useMemo(() => summarizeMetrics(metricData, rows), [metricData, rows]);
-  const chartSummary = useMemo(() => summarizeMetrics(chartData, rows), [chartData, rows]);
+  const topExtendedMetrics = useMemo(() => {
+    const metricDateKeys = new Set(metricData.map((row) => row.date));
+    const matchesById = new Map(rows.map((row) => [row.id, row]));
 
-  const topPreviousSummary = useMemo(() => {
-    if (!fullChartData.length) {
-      return summarizeMetrics([], rows);
-    }
-
-    if (metricFilterMode === "preset") {
-      const days = metricRangeMode === "7d" ? 7 : metricRangeMode === "30d" ? 30 : 90;
-      const maxDate = fullChartData.at(-1)?.date;
-      const endDate = maxDate ? parseDateKey(maxDate) : null;
-      if (!endDate) {
-        return summarizeMetrics([], rows);
+    const singlesCount = rows.reduce((count, row) => {
+      if (!metricDateKeys.has(row.date)) {
+        return count;
       }
-      const currentStart = new Date(endDate);
-      currentStart.setDate(endDate.getDate() - (days - 1));
-      const prevEnd = new Date(currentStart);
-      prevEnd.setDate(currentStart.getDate() - 1);
-      const prevStart = new Date(prevEnd);
-      prevStart.setDate(prevEnd.getDate() - (days - 1));
-      return summarizeMetrics(filterChartRowsByBounds(fullChartData, prevStart, prevEnd), rows);
-    }
+      const stakeValue = Number(
+        betsState.rowStakes[row.id] && betsState.rowStakes[row.id] !== ""
+          ? betsState.rowStakes[row.id]
+          : betsState.defaultStake
+      );
+      return Number.isFinite(stakeValue) && stakeValue > 0 ? count + 1 : count;
+    }, 0);
 
-    if (!metricDateRange?.from && !metricDateRange?.to) {
-      return summarizeMetrics([], rows);
-    }
+    const accumulatorsCount = betsState.accumulators.reduce((count, accumulator) => {
+      if (!accumulator.matchIds.length) {
+        return count;
+      }
+      const stakeValue = Number(accumulator.stake);
+      if (!Number.isFinite(stakeValue) || stakeValue <= 0) {
+        return count;
+      }
+      const accumulatorMatches = accumulator.matchIds
+        .map((id) => matchesById.get(id))
+        .filter((match): match is MatchAnalyticsRow => Boolean(match));
+      if (!accumulatorMatches.length) {
+        return count;
+      }
+      const day = accumulator.day ?? accumulatorMatches[0].date;
+      if (!day || !metricDateKeys.has(day)) {
+        return count;
+      }
+      return count + 1;
+    }, 0);
 
-    const start = metricDateRange?.from
-      ? new Date(
-          metricDateRange.from.getFullYear(),
-          metricDateRange.from.getMonth(),
-          metricDateRange.from.getDate()
-        )
-      : null;
-    const endRaw = metricDateRange?.to ?? metricDateRange?.from ?? null;
-    const end = endRaw
-      ? new Date(endRaw.getFullYear(), endRaw.getMonth(), endRaw.getDate())
-      : null;
-    if (!start || !end) {
-      return summarizeMetrics([], rows);
-    }
+    const totalBets = singlesCount + accumulatorsCount;
+    const averageProfitPerBet = totalBets > 0 ? topSummary.profit / totalBets : 0;
 
-    const days = Math.max(
-      1,
-      Math.floor((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1
-    );
-    const prevEnd = new Date(start);
-    prevEnd.setDate(start.getDate() - 1);
-    const prevStart = new Date(prevEnd);
-    prevStart.setDate(prevEnd.getDate() - (days - 1));
-    return summarizeMetrics(filterChartRowsByBounds(fullChartData, prevStart, prevEnd), rows);
-  }, [fullChartData, metricDateRange, metricFilterMode, metricRangeMode, rows]);
+    const dailyReturns = metricData
+      .filter((row) => row.spent > 0)
+      .map((row) => ((row.received - row.spent) / row.spent) * 100);
 
-  const chartPreviousSummary = useMemo(() => {
-    if (!chartData.length) {
-      return summarizeMetrics([], rows);
-    }
+    const dailyReturnAverage =
+      dailyReturns.length > 0
+        ? dailyReturns.reduce((sum, value) => sum + value, 0) / dailyReturns.length
+        : 0;
+    const bestDailyReturn = dailyReturns.length > 0 ? Math.max(...dailyReturns) : 0;
+    const worstDailyReturn = dailyReturns.length > 0 ? Math.min(...dailyReturns) : 0;
 
-    const first = chartData[0];
-    const last = chartData[chartData.length - 1];
-    const start = parseDateKey(first.date);
-    const end = parseDateKey(last.date);
-    if (!start || !end) {
-      return summarizeMetrics([], rows);
-    }
-
-    const days = chartData.length;
-    const prevEnd = new Date(start);
-    prevEnd.setDate(start.getDate() - 1);
-    const prevStart = new Date(prevEnd);
-    prevStart.setDate(prevEnd.getDate() - (days - 1));
-
-    return summarizeMetrics(filterChartRowsByBounds(fullChartData, prevStart, prevEnd), rows);
-  }, [chartData, fullChartData, rows]);
-
-  const topDeltas = {
-    profit: topSummary.profit - topPreviousSummary.profit,
-    spent: topSummary.spent - topPreviousSummary.spent,
-    received: topSummary.received - topPreviousSummary.received,
-    success: topSummary.successPercent - topPreviousSummary.successPercent,
-  };
-
-  const chartDeltas = {
-    profit: chartSummary.profit - chartPreviousSummary.profit,
-    spent: chartSummary.spent - chartPreviousSummary.spent,
-    received: chartSummary.received - chartPreviousSummary.received,
-    success: chartSummary.successPercent - chartPreviousSummary.successPercent,
-  };
+    return {
+      averageProfitPerBet,
+      dailyReturnAverage,
+      bestDailyReturn,
+      worstDailyReturn,
+      totalBets,
+    };
+  }, [betsState.accumulators, betsState.defaultStake, betsState.rowStakes, metricData, rows, topSummary.profit]);
 
   const rangeLabel =
-    rangeMode === "90d"
-      ? "Last 3 months"
+    rangeMode === "7d"
+      ? "Last Week"
       : rangeMode === "30d"
-        ? "Last 30 days"
-        : "Last 7 days";
-
-  const metricRangeLabel =
-    metricRangeMode === "90d"
-      ? "Last 3 months"
-      : metricRangeMode === "30d"
-        ? "Last 30 days"
-        : "Last 7 days";
+        ? "Last Month"
+        : rangeMode === "90d"
+          ? "Last 3 Months"
+          : rangeMode === "180d"
+            ? "Last 6 Months"
+            : rangeMode === "365d"
+              ? "Last 12 Months"
+              : "All Time";
 
   return (
     <div className="space-y-6 pb-6">
@@ -442,93 +445,28 @@ export function AnalyticsSpentReceivedChart() {
             <div>
               <CardTitle>Total Metrics</CardTitle>
               <CardDescription>
-                Absolute totals using an independent metric time selector.
+                Absolute totals using the same time filter as the chart.
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-end gap-2">
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Metric Filter</Label>
-                <div className="inline-flex rounded-md border p-1">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={metricFilterMode === "preset" ? "default" : "ghost"}
-                    onClick={() => setMetricFilterMode("preset")}
-                  >
-                    Preset
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={metricFilterMode === "range" ? "default" : "ghost"}
-                    onClick={() => setMetricFilterMode("range")}
-                  >
-                    Date Range
-                  </Button>
-                </div>
-              </div>
-
-              {metricFilterMode === "preset" ? (
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Range</Label>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="w-[180px] justify-between rounded-lg"
-                        >
-                          {metricRangeLabel}
-                          <ChevronDownIcon className="size-4 opacity-70" />
-                        </Button>
-                      }
-                    />
-                    <DropdownMenuContent align="end" className="w-[180px] rounded-xl">
-                      <DropdownMenuItem onClick={() => setMetricRangeMode("90d")}>
-                        Last 3 months
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setMetricRangeMode("30d")}>
-                        Last 30 days
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setMetricRangeMode("7d")}>
-                        Last 7 days
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Date Range</Label>
-                  <Popover modal={false}>
-                    <PopoverTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="w-[260px] justify-start font-normal"
-                        >
-                          {metricDateRange?.from
-                            ? metricDateRange.to
-                              ? `${formatDateDisplay(
-                                  toDateKey(metricDateRange.from)
-                                )} - ${formatDateDisplay(toDateKey(metricDateRange.to))}`
-                              : formatDateDisplay(toDateKey(metricDateRange.from))
-                            : "Pick date range"}
-                        </Button>
-                      }
-                    />
-                    <PopoverContent align="end" className="w-auto p-0" initialFocus={false}>
-                      <Calendar
-                        mode="range"
-                        selected={metricDateRange}
-                        onSelect={setMetricDateRange}
-                        numberOfMonths={2}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button type="button" variant="outline" className="w-[180px] justify-between rounded-lg">
+                      {rangeLabel}
+                      <ChevronDownIcon className="size-4 opacity-70" />
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end" className="w-[180px] rounded-xl">
+                  <DropdownMenuItem onClick={() => setRangeMode("7d")}>Last Week</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setRangeMode("30d")}>Last Month</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setRangeMode("90d")}>Last 3 Months</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setRangeMode("180d")}>Last 6 Months</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setRangeMode("365d")}>Last 12 Months</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setRangeMode("all")}>All Time</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </CardHeader>
@@ -540,19 +478,6 @@ export function AnalyticsSpentReceivedChart() {
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                   <CurrencyTicker value={topSummary.profit} />
                 </CardTitle>
-                <CardAction>
-                  {topDeltas.profit >= 0 ? (
-                    <div className="flex items-center gap-1 text-xs text-emerald-500">
-                      <TrendingUpIcon className="size-4" />
-                      {formatDeltaCurrency(topDeltas.profit)}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 text-xs text-red-500">
-                      <TrendingDownIcon className="size-4" />
-                      {formatDeltaCurrency(topDeltas.profit)}
-                    </div>
-                  )}
-                </CardAction>
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
                 <div className="line-clamp-1 flex gap-2 font-medium">
@@ -564,55 +489,14 @@ export function AnalyticsSpentReceivedChart() {
 
             <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
               <CardHeader>
-                <CardDescription>Total % Win</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  <PercentTicker value={topSummary.successPercent} />
-                </CardTitle>
-                <CardAction>
-                  {topDeltas.success >= 0 ? (
-                    <div className="flex items-center gap-1 text-xs text-emerald-500">
-                      <TrendingUpIcon className="size-4" />
-                      {formatDeltaPercentPoints(topDeltas.success)}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 text-xs text-red-500">
-                      <TrendingDownIcon className="size-4" />
-                      {formatDeltaPercentPoints(topDeltas.success)}
-                    </div>
-                  )}
-                </CardAction>
-              </CardHeader>
-              <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                <div className="line-clamp-1 flex gap-2 font-medium">
-                  {topSummary.wins} correct from {topSummary.decided} decided
-                </div>
-                <div className="text-muted-foreground">Compared with previous period</div>
-              </CardFooter>
-            </Card>
-
-            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-              <CardHeader>
                 <CardDescription>Total Spent</CardDescription>
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                   <CurrencyTicker value={topSummary.spent} />
                 </CardTitle>
-                <CardAction>
-                  {topDeltas.spent >= 0 ? (
-                    <div className="flex items-center gap-1 text-xs text-emerald-500">
-                      <TrendingUpIcon className="size-4" />
-                      {formatDeltaCurrency(topDeltas.spent)}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 text-xs text-red-500">
-                      <TrendingDownIcon className="size-4" />
-                      {formatDeltaCurrency(topDeltas.spent)}
-                    </div>
-                  )}
-                </CardAction>
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
                 <div className="line-clamp-1 flex gap-2 font-medium">Stake outflow</div>
-                <div className="text-muted-foreground">Singles and accumulators vs previous period</div>
+                <div className="text-muted-foreground">Singles and accumulators</div>
               </CardFooter>
             </Card>
 
@@ -622,24 +506,80 @@ export function AnalyticsSpentReceivedChart() {
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                   <CurrencyTicker value={topSummary.received} />
                 </CardTitle>
-                <CardAction>
-                  {topDeltas.received >= 0 ? (
-                    <div className="flex items-center gap-1 text-xs text-emerald-500">
-                      <TrendingUpIcon className="size-4" />
-                      {formatDeltaCurrency(topDeltas.received)}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 text-xs text-red-500">
-                      <TrendingDownIcon className="size-4" />
-                      {formatDeltaCurrency(topDeltas.received)}
-                    </div>
-                  )}
-                </CardAction>
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
                 <div className="line-clamp-1 flex gap-2 font-medium">Total returns received</div>
+                <div className="text-muted-foreground">Winning singles and accumulators</div>
+              </CardFooter>
+            </Card>
+
+            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
+              <CardHeader>
+                <CardDescription>Avg Profit per Bet</CardDescription>
+                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+                  <CurrencyTicker value={topExtendedMetrics.averageProfitPerBet} />
+                </CardTitle>
+              </CardHeader>
+              <CardFooter className="flex-col items-start gap-1.5 text-sm">
+                <div className="line-clamp-1 flex gap-2 font-medium">
+                  Across {topExtendedMetrics.totalBets} total bets
+                </div>
+                <div className="text-muted-foreground">Profit divided by singles + accumulators</div>
+              </CardFooter>
+            </Card>
+
+            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
+              <CardHeader>
+                <CardDescription>Winner Prediction %</CardDescription>
+                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+                  <PercentTicker value={topSummary.successPercent} />
+                </CardTitle>
+              </CardHeader>
+              <CardFooter className="flex-col items-start gap-1.5 text-sm">
+                <div className="line-clamp-1 flex gap-2 font-medium">
+                  {topSummary.wins} correct from {topSummary.decided} decided
+                </div>
+                <div className="text-muted-foreground">Prediction hit rate in selected period</div>
+              </CardFooter>
+            </Card>
+
+            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
+              <CardHeader>
+                <CardDescription>Daily Return % Average</CardDescription>
+                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+                  <PercentTicker value={topExtendedMetrics.dailyReturnAverage} />
+                </CardTitle>
+              </CardHeader>
+              <CardFooter className="flex-col items-start gap-1.5 text-sm">
+                <div className="line-clamp-1 flex gap-2 font-medium">Mean daily ROI</div>
+                <div className="text-muted-foreground">Average of daily return percentages</div>
+              </CardFooter>
+            </Card>
+
+            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
+              <CardHeader>
+                <CardDescription>Best Daily Return %</CardDescription>
+                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+                  <PercentTicker value={topExtendedMetrics.bestDailyReturn} />
+                </CardTitle>
+              </CardHeader>
+              <CardFooter className="flex-col items-start gap-1.5 text-sm">
+                <div className="line-clamp-1 flex gap-2 font-medium">Highest day in range</div>
+                <div className="text-muted-foreground">Based on (received - spent) / spent</div>
+              </CardFooter>
+            </Card>
+
+            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
+              <CardHeader>
+                <CardDescription>Worst Daily Return %</CardDescription>
+                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+                  <PercentTicker value={topExtendedMetrics.worstDailyReturn} />
+                </CardTitle>
+              </CardHeader>
+              <CardFooter className="flex-col items-start gap-1.5 text-sm">
+                <div className="line-clamp-1 flex gap-2 font-medium">Lowest day in range</div>
                 <div className="text-muted-foreground">
-                  Winning singles and accumulators vs previous period
+                  Based on (received - spent) / spent
                 </div>
               </CardFooter>
             </Card>
@@ -660,26 +600,23 @@ export function AnalyticsSpentReceivedChart() {
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="ml-auto w-[180px] justify-between rounded-lg"
-                >
-                  {rangeLabel}
+                <Button type="button" variant="outline" className="ml-auto w-[160px] justify-between rounded-lg">
+                  {chartViewMode === "daily"
+                    ? "Daily"
+                    : chartViewMode === "weekly"
+                      ? "Weekly"
+                      : chartViewMode === "monthly"
+                        ? "Monthly"
+                        : "Quarterly"}
                   <ChevronDownIcon className="size-4 opacity-70" />
                 </Button>
               }
             />
-            <DropdownMenuContent align="end" className="w-[180px] rounded-xl">
-              <DropdownMenuItem onClick={() => setRangeMode("90d")}>
-                Last 3 months
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setRangeMode("30d")}>
-                Last 30 days
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setRangeMode("7d")}>
-                Last 7 days
-              </DropdownMenuItem>
+            <DropdownMenuContent align="end" className="w-[160px] rounded-xl">
+              <DropdownMenuItem onClick={() => setChartViewMode("daily")}>Daily</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setChartViewMode("weekly")}>Weekly</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setChartViewMode("monthly")}>Monthly</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setChartViewMode("quarterly")}>Quarterly</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </CardHeader>
@@ -692,7 +629,7 @@ export function AnalyticsSpentReceivedChart() {
           ) : (
             <ChartContainer config={chartConfig} className="h-[420px] w-full">
               <BarChart
-                data={chartData}
+                data={displayChartData}
                 margin={{
                   left: 8,
                   right: 16,
@@ -708,15 +645,39 @@ export function AnalyticsSpentReceivedChart() {
                   tickMargin={8}
                   minTickGap={36}
                   interval="preserveStartEnd"
-                  tickFormatter={formatDateTick}
+                  tickFormatter={(value) => formatBucketTick(String(value), chartViewMode)}
                 />
                 <YAxis tickLine={false} axisLine={false} />
                 <ChartTooltip
                   cursor={false}
                   content={
                     <ChartTooltipContent
-                      labelFormatter={(value) => formatDateDisplay(String(value))}
+                      labelFormatter={(value) => formatBucketTooltip(String(value), chartViewMode)}
                       formatter={(value) => Number(value ?? 0).toFixed(2)}
+                      extraRows={(payload) => {
+                        const spent = Number(
+                          payload.find((item) => String(item.dataKey ?? "") === "spent")?.value ?? 0
+                        );
+                        const received = Number(
+                          payload.find((item) => String(item.dataKey ?? "") === "received")?.value ?? 0
+                        );
+                        const returnPercent =
+                          spent > 0 ? ((received - spent) / spent) * 100 : 0;
+                        const returnLabel = `${returnPercent >= 0 ? "+" : ""}${returnPercent.toFixed(1)}%`;
+                        const returnColorClass =
+                          returnPercent >= 0 ? "text-emerald-500" : "text-red-500";
+
+                        return (
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-muted-foreground">Return %</span>
+                            <span
+                              className={`font-mono font-medium tabular-nums ${returnColorClass}`}
+                            >
+                              {returnLabel}
+                            </span>
+                          </div>
+                        );
+                      }}
                     />
                   }
                 />
@@ -741,127 +702,6 @@ export function AnalyticsSpentReceivedChart() {
             </ChartContainer>
           )}
 
-          <section className="space-y-3">
-            <div>
-              <h3 className="text-base font-semibold">Range Metrics</h3>
-              <p className="text-sm text-muted-foreground">
-                These metrics follow the chart time selector above.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-                <CardHeader>
-                  <CardDescription>Profit</CardDescription>
-                  <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                    <CurrencyTicker value={chartSummary.profit} />
-                  </CardTitle>
-                  <CardAction>
-                    {chartDeltas.profit >= 0 ? (
-                      <div className="flex items-center gap-1 text-xs text-emerald-500">
-                        <TrendingUpIcon className="size-4" />
-                        {formatDeltaCurrency(chartDeltas.profit)}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1 text-xs text-red-500">
-                        <TrendingDownIcon className="size-4" />
-                        {formatDeltaCurrency(chartDeltas.profit)}
-                      </div>
-                    )}
-                  </CardAction>
-                </CardHeader>
-                <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                  <div className="line-clamp-1 flex gap-2 font-medium">
-                    {chartSummary.profit >= 0 ? "Positive return" : "Negative return"}
-                  </div>
-                  <div className="text-muted-foreground">Received minus spent vs previous period</div>
-                </CardFooter>
-              </Card>
-
-              <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-                <CardHeader>
-                  <CardDescription>Spent</CardDescription>
-                  <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                    <CurrencyTicker value={chartSummary.spent} />
-                  </CardTitle>
-                  <CardAction>
-                    {chartDeltas.spent >= 0 ? (
-                      <div className="flex items-center gap-1 text-xs text-emerald-500">
-                        <TrendingUpIcon className="size-4" />
-                        {formatDeltaCurrency(chartDeltas.spent)}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1 text-xs text-red-500">
-                        <TrendingDownIcon className="size-4" />
-                        {formatDeltaCurrency(chartDeltas.spent)}
-                      </div>
-                    )}
-                  </CardAction>
-                </CardHeader>
-                <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                  <div className="line-clamp-1 flex gap-2 font-medium">Stake outflow</div>
-                  <div className="text-muted-foreground">Singles and accumulators vs previous period</div>
-                </CardFooter>
-              </Card>
-
-              <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-                <CardHeader>
-                  <CardDescription>Received</CardDescription>
-                  <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                    <CurrencyTicker value={chartSummary.received} />
-                  </CardTitle>
-                  <CardAction>
-                    {chartDeltas.received >= 0 ? (
-                      <div className="flex items-center gap-1 text-xs text-emerald-500">
-                        <TrendingUpIcon className="size-4" />
-                        {formatDeltaCurrency(chartDeltas.received)}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1 text-xs text-red-500">
-                        <TrendingDownIcon className="size-4" />
-                        {formatDeltaCurrency(chartDeltas.received)}
-                      </div>
-                    )}
-                  </CardAction>
-                </CardHeader>
-                <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                  <div className="line-clamp-1 flex gap-2 font-medium">
-                  Returns received
-                  </div>
-                  <div className="text-muted-foreground">
-                    Winning singles and accumulators vs previous period
-                  </div>
-                </CardFooter>
-              </Card>
-
-              <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-                <CardHeader>
-                  <CardDescription>% Win</CardDescription>
-                  <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                    <PercentTicker value={chartSummary.successPercent} />
-                  </CardTitle>
-                  <CardAction>
-                    {chartDeltas.success >= 0 ? (
-                      <div className="flex items-center gap-1 text-xs text-emerald-500">
-                        <TrendingUpIcon className="size-4" />
-                        {formatDeltaPercentPoints(chartDeltas.success)}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1 text-xs text-red-500">
-                        <TrendingDownIcon className="size-4" />
-                        {formatDeltaPercentPoints(chartDeltas.success)}
-                      </div>
-                    )}
-                  </CardAction>
-                </CardHeader>
-                <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                  <div className="line-clamp-1 flex gap-2 font-medium">
-                    {chartSummary.wins} correct from {chartSummary.decided} decided
-                  </div>
-                  <div className="text-muted-foreground">Compared with previous period</div>
-                </CardFooter>
-              </Card>
-            </div>
-          </section>
         </CardContent>
       </Card>
     </div>
