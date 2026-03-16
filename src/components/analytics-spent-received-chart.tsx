@@ -216,12 +216,16 @@ export function AnalyticsSpentReceivedChart() {
   const listenerError = matchesError ?? betsStateError ?? null;
 
   const fullChartData = useMemo<ChartRow[]>(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayKey = toDateKey(today);
+
     const byDate = new Map<string, ChartRow>();
     const matchesById = new Map(rows.map((row) => [row.id, row]));
 
-    // Singles (per fixture stakes)
+    // Singles (per fixture stakes) - only include dates up to today
     rows.forEach((row) => {
-      if (!row.date) {
+      if (!row.date || row.date > todayKey) {
         return;
       }
 
@@ -269,7 +273,7 @@ export function AnalyticsSpentReceivedChart() {
       }
 
       const day = accumulator.day ?? accumulatorMatches[0].date;
-      if (!day) {
+      if (!day || day > todayKey) {
         return;
       }
 
@@ -303,6 +307,9 @@ export function AnalyticsSpentReceivedChart() {
   }, [betsState, rows]);
 
   const chartData = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     const daysByMode: Record<Exclude<MetricsRangeMode, "all">, number> = {
       "7d": 7,
       "30d": 30,
@@ -311,7 +318,8 @@ export function AnalyticsSpentReceivedChart() {
       "365d": 365,
     };
     const maxDate = fullChartData.at(-1)?.date;
-    const endDate = maxDate ? parseDateKey(maxDate) : null;
+    const dataEndDate = maxDate ? parseDateKey(maxDate) : null;
+    const endDate = dataEndDate && dataEndDate > today ? today : dataEndDate;
     if (!endDate) {
       return [];
     }
@@ -329,7 +337,7 @@ export function AnalyticsSpentReceivedChart() {
     const sequence: ChartRow[] = [];
     const current = new Date(startDate);
 
-    while (current <= endDate) {
+    while (current <= endDate && current <= today) {
       const key = toDateKey(current);
       const existing = byDate.get(key) ?? {
         date: key,
@@ -674,21 +682,32 @@ export function AnalyticsSpentReceivedChart() {
                         const received = Number(
                           payload.find((item) => String(item.dataKey ?? "") === "received")?.value ?? 0
                         );
+                        const profit = received - spent;
                         const returnPercent =
                           spent > 0 ? ((received - spent) / spent) * 100 : 0;
                         const returnLabel = `${returnPercent >= 0 ? "+" : ""}${returnPercent.toFixed(1)}%`;
-                        const returnColorClass =
-                          returnPercent >= 0 ? "text-emerald-500" : "text-red-500";
+                        const colorClass =
+                          profit >= 0 ? "text-emerald-500" : "text-red-500";
 
                         return (
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-muted-foreground">Return %</span>
-                            <span
-                              className={`font-mono font-medium tabular-nums ${returnColorClass}`}
-                            >
-                              {returnLabel}
-                            </span>
-                          </div>
+                          <>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-muted-foreground">Profit</span>
+                              <span
+                                className={`font-mono font-medium tabular-nums ${colorClass}`}
+                              >
+                                {formatCurrency(profit)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-muted-foreground">Return %</span>
+                              <span
+                                className={`font-mono font-medium tabular-nums ${colorClass}`}
+                              >
+                                {returnLabel}
+                              </span>
+                            </div>
+                          </>
                         );
                       }}
                     />

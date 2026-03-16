@@ -25,7 +25,8 @@ import { useMatches } from "@/hooks/firebase/use-matches";
 import type { BetsState } from "@/types/domain/bets";
 import type { MatchBase } from "@/types/domain/match";
 import type { ProfitRow } from "@/types/analytics";
-import type { RangeMode } from "@/types/filters";
+
+type TotalsRangeMode = "7d" | "30d" | "90d" | "180d" | "365d" | "all";
 
 type MatchRow = Pick<MatchBase, "id" | "date" | "odds" | "winnerSide"> & {
   actualWinnerSide: "home" | "away" | "draw" | null;
@@ -57,7 +58,7 @@ function formatCurrency(value: number) {
 
 export function AnalyticsTotalProfitAreaChart() {
   const uid = useAuthUid();
-  const [rangeMode, setRangeMode] = useState<RangeMode>("90d");
+  const [rangeMode, setRangeMode] = useState<TotalsRangeMode>("30d");
   const mapMatch = useCallback(
     (id: string, data: Record<string, unknown>): MatchRow => ({
       id,
@@ -79,11 +80,15 @@ export function AnalyticsTotalProfitAreaChart() {
   const resolvedBetsState: BetsState = betsState;
 
   const fullProfitData = useMemo<ProfitRow[]>(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayKey = toDateKey(today);
+
     const byDate = new Map<string, ProfitRow>();
     const matchesById = new Map(matches.map((row) => [row.id, row]));
 
     matches.forEach((row) => {
-      if (!row.date) {
+      if (!row.date || row.date > todayKey) {
         return;
       }
       const stake = Number(
@@ -120,7 +125,7 @@ export function AnalyticsTotalProfitAreaChart() {
       }
 
       const day = accumulator.day ?? selected[0].date;
-      if (!day) {
+      if (!day || day > todayKey) {
         return;
       }
 
@@ -148,20 +153,40 @@ export function AnalyticsTotalProfitAreaChart() {
   }, [matches, resolvedBetsState]);
 
   const chartData = useMemo(() => {
-    const days = rangeMode === "7d" ? 7 : rangeMode === "30d" ? 30 : 90;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const daysByMode: Record<Exclude<TotalsRangeMode, "all">, number> = {
+      "7d": 7,
+      "30d": 30,
+      "90d": 90,
+      "180d": 180,
+      "365d": 365,
+    };
     const maxDate = fullProfitData.at(-1)?.date;
-    const endDate = maxDate ? parseDateKey(maxDate) : null;
+    const dataEndDate = maxDate ? parseDateKey(maxDate) : null;
+    const endDate = dataEndDate && dataEndDate > today ? today : dataEndDate;
     if (!endDate) {
       return [];
     }
 
+    const startDate =
+      rangeMode === "all"
+        ? (parseDateKey(fullProfitData[0]?.date ?? "") ?? endDate)
+        : (() => {
+            const start = new Date(endDate);
+            start.setDate(endDate.getDate() - (daysByMode[rangeMode] - 1));
+            return start;
+          })();
+
     const byDate = new Map(fullProfitData.map((row) => [row.date, row]));
     const next: ProfitRow[] = [];
-    for (let offset = days - 1; offset >= 0; offset -= 1) {
-      const current = new Date(endDate);
-      current.setDate(endDate.getDate() - offset);
+    const current = new Date(startDate);
+
+    while (current <= endDate && current <= today) {
       const key = toDateKey(current);
       next.push(byDate.get(key) ?? { date: key, spent: 0, received: 0, profit: 0 });
+      current.setDate(current.getDate() + 1);
     }
     return next;
   }, [fullProfitData, rangeMode]);
@@ -201,11 +226,17 @@ export function AnalyticsTotalProfitAreaChart() {
   }, [chartData]);
 
   const rangeLabel =
-    rangeMode === "90d"
-      ? "Last 3 months"
+    rangeMode === "7d"
+      ? "Last Week"
       : rangeMode === "30d"
-        ? "Last 30 days"
-        : "Last 7 days";
+        ? "Last Month"
+        : rangeMode === "90d"
+          ? "Last 3 Months"
+          : rangeMode === "180d"
+            ? "Last 6 Months"
+            : rangeMode === "365d"
+              ? "Last 12 Months"
+              : "All Time";
 
   return (
     <Card className="pt-0">
@@ -230,9 +261,12 @@ export function AnalyticsTotalProfitAreaChart() {
             }
           />
           <DropdownMenuContent align="end" className="w-[180px] rounded-xl">
-            <DropdownMenuItem onClick={() => setRangeMode("90d")}>Last 3 months</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setRangeMode("30d")}>Last 30 days</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setRangeMode("7d")}>Last 7 days</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setRangeMode("7d")}>Last Week</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setRangeMode("30d")}>Last Month</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setRangeMode("90d")}>Last 3 Months</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setRangeMode("180d")}>Last 6 Months</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setRangeMode("365d")}>Last 12 Months</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setRangeMode("all")}>All Time</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </CardHeader>
