@@ -15,7 +15,6 @@ import {
 } from "@tanstack/react-table";
 import {
   addDoc,
-  collection,
   deleteDoc,
   doc,
   onSnapshot,
@@ -25,8 +24,9 @@ import {
   updateDoc,
 } from "firebase/firestore";
 
-import { db, isFirebaseConfigured } from "@/lib/firebase";
+import { isFirebaseConfigured } from "@/lib/firebase";
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
+import { useMatchesCollection } from "@/hooks/firebase/use-matches-collection";
 import { mapMatchInputRow } from "@/hooks/firebase/match-mappers";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -94,13 +94,7 @@ export function MatchOddsFormTable() {
   const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
   const [filterMode, setFilterMode] = useState<DateFilterMode>("date");
 
-  const matchesCollection = useMemo(() => {
-    if (!db || !uid) {
-      return null;
-    }
-
-    return collection(db, "users", uid, "matches");
-  }, [uid]);
+  const matchesCollection = useMatchesCollection(uid);
 
   useEffect(() => {
     if (!matchesCollection) {

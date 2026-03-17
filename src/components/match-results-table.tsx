@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { collection, doc, onSnapshot, orderBy, query, updateDoc } from "firebase/firestore";
+import { doc, onSnapshot, orderBy, query, updateDoc } from "firebase/firestore";
 import {
   type ColumnDef,
   type SortingState,
@@ -16,8 +15,10 @@ import {
 } from "lucide-react";
 import type { DateRange } from "react-day-picker";
 
-import { auth, db, isFirebaseConfigured } from "@/lib/firebase";
+import { isFirebaseConfigured } from "@/lib/firebase";
+import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { mapMatchResultRow } from "@/hooks/firebase/match-mappers";
+import { useMatchesCollection } from "@/hooks/firebase/use-matches-collection";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
@@ -37,7 +38,7 @@ import type { DateFilterMode } from "@/types/filters";
 import { formatDateDisplay, formatDateForInput, matchesDateFilter } from "@/lib/date-utils";
 
 export function MatchResultsTable() {
-  const [uid, setUid] = useState<string | null>(auth?.currentUser?.uid ?? null);
+  const uid = useAuthUid();
   const [rows, setRows] = useState<MatchResultRow[]>([]);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -46,24 +47,7 @@ export function MatchResultsTable() {
   const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
   const [filterMode, setFilterMode] = useState<DateFilterMode>("date");
 
-  const matchesCollection = useMemo(() => {
-    if (!db || !uid) {
-      return null;
-    }
-    return collection(db, "users", uid, "matches");
-  }, [uid]);
-
-  useEffect(() => {
-    if (!auth) {
-      return;
-    }
-
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUid(user?.uid ?? null);
-    });
-
-    return () => unsubscribe();
-  }, []);
+  const matchesCollection = useMatchesCollection(uid);
 
   useEffect(() => {
     if (!matchesCollection) {

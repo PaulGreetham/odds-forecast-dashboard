@@ -39,6 +39,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { formatDateDisplay, parseDateKey, toDateKey } from "@/lib/date-utils";
+import {
+  ANALYTICS_RANGE_OPTIONS,
+  getAnalyticsRangeLabel,
+  resolveAnalyticsRangeStartDate,
+  type AnalyticsRangeMode,
+} from "@/lib/analytics-range";
 import { formatEuroSigned } from "@/lib/number-format";
 import type { ChartRow, MetricsSummary } from "@/types/analytics";
 
@@ -57,7 +63,6 @@ type ExtendedMetrics = {
   bettingDays: number;
 };
 
-type MetricsRangeMode = "7d" | "30d" | "90d" | "180d" | "365d" | "all";
 type ChartViewMode = "daily" | "weekly" | "monthly" | "quarterly";
 
 const chartConfig = {
@@ -277,7 +282,7 @@ function deriveExtendedMetrics({
 
 export function AnalyticsSpentReceivedChart() {
   const uid = useAuthUid();
-  const [rangeMode, setRangeMode] = useState<MetricsRangeMode>("30d");
+  const [rangeMode, setRangeMode] = useState<AnalyticsRangeMode>("30d");
   const [chartViewMode, setChartViewMode] = useState<ChartViewMode>("daily");
   const { rows, error: matchesError } = useMatches(uid, mapMatchOutcomeRow, "date", "asc");
   const { betsState, error: betsStateError } = useBetsState(uid);
@@ -378,13 +383,6 @@ export function AnalyticsSpentReceivedChart() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const daysByMode: Record<Exclude<MetricsRangeMode, "all">, number> = {
-      "7d": 7,
-      "30d": 30,
-      "90d": 90,
-      "180d": 180,
-      "365d": 365,
-    };
     const maxDate = fullChartData.at(-1)?.date;
     const dataEndDate = maxDate ? parseDateKey(maxDate) : null;
     const endDate = dataEndDate && dataEndDate > today ? today : dataEndDate;
@@ -392,14 +390,11 @@ export function AnalyticsSpentReceivedChart() {
       return [];
     }
 
-    const startDate =
-      rangeMode === "all"
-        ? (parseDateKey(fullChartData[0]?.date ?? "") ?? endDate)
-        : (() => {
-            const start = new Date(endDate);
-            start.setDate(endDate.getDate() - (daysByMode[rangeMode] - 1));
-            return start;
-          })();
+    const startDate = resolveAnalyticsRangeStartDate({
+      mode: rangeMode,
+      endDate,
+      firstDateKey: fullChartData[0]?.date,
+    });
 
     const byDate = new Map(fullChartData.map((row) => [row.date, row]));
     const sequence: ChartRow[] = [];
@@ -566,18 +561,7 @@ export function AnalyticsSpentReceivedChart() {
     );
   };
 
-  const rangeLabel =
-    rangeMode === "7d"
-      ? "Last Week"
-      : rangeMode === "30d"
-        ? "Last Month"
-        : rangeMode === "90d"
-          ? "Last 3 Months"
-          : rangeMode === "180d"
-            ? "Last 6 Months"
-            : rangeMode === "365d"
-              ? "Last 12 Months"
-              : "All Time";
+  const rangeLabel = getAnalyticsRangeLabel(rangeMode);
 
   return (
     <div className="space-y-6 pb-6">
@@ -601,12 +585,11 @@ export function AnalyticsSpentReceivedChart() {
                   }
                 />
                 <DropdownMenuContent align="end" className="w-[180px] rounded-xl">
-                  <DropdownMenuItem onClick={() => setRangeMode("7d")}>Last Week</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setRangeMode("30d")}>Last Month</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setRangeMode("90d")}>Last 3 Months</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setRangeMode("180d")}>Last 6 Months</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setRangeMode("365d")}>Last 12 Months</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setRangeMode("all")}>All Time</DropdownMenuItem>
+                  {ANALYTICS_RANGE_OPTIONS.map((option) => (
+                    <DropdownMenuItem key={option.value} onClick={() => setRangeMode(option.value)}>
+                      {option.label}
+                    </DropdownMenuItem>
+                  ))}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>

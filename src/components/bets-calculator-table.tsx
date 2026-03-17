@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  collection,
   doc as firestoreDoc,
   onSnapshot,
   orderBy,
@@ -29,6 +28,7 @@ import {
   matchesDateFilter,
 } from "@/lib/date-utils";
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
+import { useMatchesCollection } from "@/hooks/firebase/use-matches-collection";
 import { mapMatchInputRow } from "@/hooks/firebase/match-mappers";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -96,12 +96,7 @@ export function BetsCalculatorTable() {
   const [isBetsStateHydrated, setIsBetsStateHydrated] = useState(false);
   const lastSavedStateRef = useRef<string>("");
 
-  const matchesCollection = useMemo(() => {
-    if (!db || !uid) {
-      return null;
-    }
-    return collection(db, "users", uid, "matches");
-  }, [uid]);
+  const matchesCollection = useMatchesCollection(uid);
 
   const betsStateDoc = useMemo(() => {
     if (!db || !uid) {
