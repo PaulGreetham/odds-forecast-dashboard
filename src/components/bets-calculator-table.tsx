@@ -19,9 +19,6 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import {
-  ArrowDownIcon,
-  ArrowUpDownIcon,
-  ArrowUpIcon,
   CalendarIcon,
   NotebookPenIcon,
   XIcon,
@@ -40,6 +37,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -496,46 +494,26 @@ export function BetsCalculatorTable() {
     [accumulatorSummaries, filterDate, filterDateRange, filterMode]
   );
 
-  function renderSortIcon(sortState: false | "asc" | "desc") {
-    if (sortState === "asc") {
-      return <ArrowUpIcon className="size-4" />;
+  function sortableHeader(
+    label: string,
+    column: {
+      toggleSorting: (desc?: boolean) => void;
+      getIsSorted: () => false | "asc" | "desc";
     }
-    if (sortState === "desc") {
-      return <ArrowDownIcon className="size-4" />;
-    }
-    return <ArrowUpDownIcon className="size-4 opacity-60" />;
+  ) {
+    return <SortableHeaderButton label={label} column={column} />;
   }
 
   const betColumns: ColumnDef<MatchBet>[] = [
     {
       accessorKey: "date",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Date
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Date", column),
       cell: ({ row }) => formatDateDisplay(row.original.date),
     },
     {
       id: "fixture",
       accessorFn: (row) => `${row.homeTeam} vs ${row.awayTeam}`,
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Fixture
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Fixture", column),
       cell: ({ row }) => (
         <span className="block truncate">
           {row.original.homeTeam} vs {row.original.awayTeam}
@@ -545,17 +523,7 @@ export function BetsCalculatorTable() {
     {
       id: "betOn",
       accessorFn: (row) => (row.winnerSide === "away" ? row.awayTeam : row.homeTeam),
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Bet On
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Bet On", column),
       cell: ({ row }) => {
         const winnerName =
           row.original.winnerSide === "away" ? row.original.awayTeam : row.original.homeTeam;
@@ -565,33 +533,13 @@ export function BetsCalculatorTable() {
     {
       id: "odds",
       accessorFn: (row) => Number(row.odds) || 0,
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Odds
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Odds", column),
       cell: ({ row }) => row.original.odds,
     },
     {
       id: "stake",
       accessorFn: (row) => getRowStake(row.id),
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Stake
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Stake", column),
       cell: ({ row }) => (
         <Input
           type="number"
@@ -615,17 +563,7 @@ export function BetsCalculatorTable() {
         const stakeValue = getRowStake(row.id);
         return stakeValue * oddsValue;
       },
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Return
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Return", column),
       cell: ({ row }) => {
         const oddsValue = Number(row.original.odds) || 0;
         const stakeValue = getRowStake(row.original.id);
@@ -639,17 +577,7 @@ export function BetsCalculatorTable() {
         const stakeValue = getRowStake(row.id);
         return stakeValue * oddsValue - stakeValue;
       },
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Profit
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Profit", column),
       cell: ({ row }) => {
         const oddsValue = Number(row.original.odds) || 0;
         const stakeValue = getRowStake(row.original.id);
@@ -660,17 +588,7 @@ export function BetsCalculatorTable() {
       id: "accumulator",
       accessorFn: (row) =>
         accumulators.filter((accumulator) => accumulator.matchIds.includes(row.id)).length,
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Accumulator
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Accumulator", column),
       cell: ({ row }) => {
         const includedCount = accumulators.filter((accumulator) =>
           accumulator.matchIds.includes(row.original.id)

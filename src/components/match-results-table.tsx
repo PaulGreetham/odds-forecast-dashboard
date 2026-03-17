@@ -13,9 +13,6 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import {
-  ArrowDownIcon,
-  ArrowUpDownIcon,
-  ArrowUpIcon,
   CalendarIcon,
   XIcon,
 } from "lucide-react";
@@ -26,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
 import {
   PaginationEllipsis,
   Pagination,
@@ -159,46 +157,26 @@ export function MatchResultsTable() {
     [filterDate, filterDateRange, filterMode, rows]
   );
 
-  function renderSortIcon(sortState: false | "asc" | "desc") {
-    if (sortState === "asc") {
-      return <ArrowUpIcon className="size-4" />;
+  function sortableHeader(
+    label: string,
+    column: {
+      toggleSorting: (desc?: boolean) => void;
+      getIsSorted: () => false | "asc" | "desc";
     }
-    if (sortState === "desc") {
-      return <ArrowDownIcon className="size-4" />;
-    }
-    return <ArrowUpDownIcon className="size-4 opacity-60" />;
+  ) {
+    return <SortableHeaderButton label={label} column={column} />;
   }
 
   const columns: ColumnDef<MatchResultRow>[] = [
     {
       accessorKey: "date",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Date
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Date", column),
       cell: ({ row }) => formatDateDisplay(row.original.date),
     },
     {
       id: "fixture",
       accessorFn: (row) => `${row.homeTeam} vs ${row.awayTeam}`,
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Fixture
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Fixture", column),
       cell: ({ row }) => (
         <span className="block truncate">
           {row.original.homeTeam} vs {row.original.awayTeam}
@@ -208,17 +186,7 @@ export function MatchResultsTable() {
     {
       id: "predictedWinner",
       accessorFn: (row) => getPredictedWinner(row),
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Predicted Winner
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Predicted Winner", column),
       cell: ({ row }) => (
         <span className="block truncate text-emerald-600 dark:text-emerald-400">
           {getPredictedWinner(row.original)}
@@ -228,17 +196,7 @@ export function MatchResultsTable() {
     {
       id: "actualWinner",
       accessorFn: (row) => getActualWinner(row),
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Actual Winner
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Actual Winner", column),
       cell: ({ row }) => (
         <div className="flex items-center gap-1.5">
           <Button
@@ -289,17 +247,7 @@ export function MatchResultsTable() {
     {
       id: "predictionResult",
       accessorFn: (row) => getPredictionResult(row),
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Prediction Result
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => sortableHeader("Prediction Result", column),
       cell: ({ row }) => {
         const predictionResult = getPredictionResult(row.original);
         return row.original.actualWinnerSide ? (

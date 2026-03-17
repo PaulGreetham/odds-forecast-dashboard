@@ -14,9 +14,6 @@ import {
 } from "@tanstack/react-table";
 import type { DateRange } from "react-day-picker";
 import {
-  ArrowDownIcon,
-  ArrowUpDownIcon,
-  ArrowUpIcon,
   CalendarIcon,
   Settings2Icon,
   XIcon,
@@ -40,6 +37,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
 import {
   Pagination,
   PaginationContent,
@@ -254,23 +252,7 @@ export function AnalyticsTablesView() {
       getIsSorted: () => false | "asc" | "desc";
     }
   ) {
-    return (
-      <Button
-        variant="ghost"
-        size="sm"
-        className="-ml-3 h-8"
-        onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-      >
-        {label}
-        {column.getIsSorted() === "asc" ? (
-          <ArrowUpIcon className="size-4" />
-        ) : column.getIsSorted() === "desc" ? (
-          <ArrowDownIcon className="size-4" />
-        ) : (
-          <ArrowUpDownIcon className="size-4 opacity-60" />
-        )}
-      </Button>
-    );
+    return <SortableHeaderButton label={label} column={column} />;
   }
 
   const columns: ColumnDef<AnalyticsTableRow>[] = [

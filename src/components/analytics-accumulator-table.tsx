@@ -9,12 +9,11 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from "lucide-react";
 
 import type { AccumulatorAnalyticsRow } from "@/types/analytics";
 import { formatDateDisplay } from "@/lib/date-utils";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 function formatCurrency(value: number) {
@@ -31,23 +30,7 @@ export function AnalyticsAccumulatorTable({ rows }: { rows: AccumulatorAnalytics
       getIsSorted: () => false | "asc" | "desc";
     }
   ) {
-    return (
-      <Button
-        variant="ghost"
-        size="sm"
-        className="-ml-3 h-8"
-        onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-      >
-        {label}
-        {column.getIsSorted() === "asc" ? (
-          <ArrowUpIcon className="size-4" />
-        ) : column.getIsSorted() === "desc" ? (
-          <ArrowDownIcon className="size-4" />
-        ) : (
-          <ArrowUpDownIcon className="size-4 opacity-60" />
-        )}
-      </Button>
-    );
+    return <SortableHeaderButton label={label} column={column} />;
   }
 
   const columns: ColumnDef<AccumulatorAnalyticsRow>[] = [
