@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -13,6 +13,7 @@ import { ChevronDownIcon, TrendingDownIcon, TrendingUpIcon } from "lucide-react"
 
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { useBetsState } from "@/hooks/firebase/use-bets-state";
+import { mapMatchOutcomeRow, type MatchOutcomeRow } from "@/hooks/firebase/match-mappers";
 import { useMatches } from "@/hooks/firebase/use-matches";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,12 +40,7 @@ import {
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { formatDateDisplay, parseDateKey, toDateKey } from "@/lib/date-utils";
 import { formatEuroSigned } from "@/lib/number-format";
-import type { MatchBase } from "@/types/domain/match";
 import type { ChartRow, MetricsSummary } from "@/types/analytics";
-
-type MatchAnalyticsRow = Pick<MatchBase, "id" | "date" | "odds" | "winnerSide"> & {
-  actualWinnerSide: "home" | "away" | "draw" | null;
-};
 
 type AccumulatorAnalyticsInput = {
   stake: string;
@@ -181,7 +177,7 @@ function PercentTicker({ value }: { value: number }) {
   );
 }
 
-function summarizeMetrics(chartRows: ChartRow[], matches: MatchAnalyticsRow[]): MetricsSummary {
+function summarizeMetrics(chartRows: ChartRow[], matches: MatchOutcomeRow[]): MetricsSummary {
   const totals = chartRows.reduce(
     (acc, row) => {
       acc.spent += row.spent;
@@ -218,7 +214,7 @@ function deriveExtendedMetrics({
 }: {
   metricData: ChartRow[];
   bettingDayRows: ChartRow[];
-  rows: MatchAnalyticsRow[];
+  rows: MatchOutcomeRow[];
   rowStakes: Record<string, string>;
   defaultStake: string;
   accumulators: AccumulatorAnalyticsInput[];
@@ -247,7 +243,7 @@ function deriveExtendedMetrics({
     }
     const accumulatorMatches = accumulator.matchIds
       .map((id) => matchesById.get(id))
-      .filter((match): match is MatchAnalyticsRow => Boolean(match));
+      .filter((match): match is MatchOutcomeRow => Boolean(match));
     if (!accumulatorMatches.length) {
       return count;
     }
@@ -283,22 +279,7 @@ export function AnalyticsSpentReceivedChart() {
   const uid = useAuthUid();
   const [rangeMode, setRangeMode] = useState<MetricsRangeMode>("30d");
   const [chartViewMode, setChartViewMode] = useState<ChartViewMode>("daily");
-  const mapMatch = useCallback(
-    (id: string, data: Record<string, unknown>): MatchAnalyticsRow => ({
-      id,
-      date: String(data.date ?? ""),
-      odds: String(data.odds ?? ""),
-      winnerSide: data.winnerSide === "away" ? "away" : "home",
-      actualWinnerSide:
-        data.actualWinnerSide === "home" ||
-        data.actualWinnerSide === "away" ||
-        data.actualWinnerSide === "draw"
-          ? data.actualWinnerSide
-          : null,
-    }),
-    []
-  );
-  const { rows, error: matchesError } = useMatches(uid, mapMatch, "date", "asc");
+  const { rows, error: matchesError } = useMatches(uid, mapMatchOutcomeRow, "date", "asc");
   const { betsState, error: betsStateError } = useBetsState(uid);
   const listenerError = matchesError ?? betsStateError ?? null;
 
@@ -354,7 +335,7 @@ export function AnalyticsSpentReceivedChart() {
 
       const accumulatorMatches = accumulator.matchIds
         .map((id) => matchesById.get(id))
-        .filter((match): match is MatchAnalyticsRow => Boolean(match));
+        .filter((match): match is MatchOutcomeRow => Boolean(match));
       if (!accumulatorMatches.length) {
         return;
       }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   type ColumnDef,
   type SortingState,
@@ -22,6 +22,7 @@ import { formatDateDisplay, formatDateForInput, matchesDateFilter } from "@/lib/
 import { formatEuro } from "@/lib/number-format";
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { useBetsState } from "@/hooks/firebase/use-bets-state";
+import { mapMatchInputWithResultRow, type MatchInputWithResultRow } from "@/hooks/firebase/match-mappers";
 import { useMatches } from "@/hooks/firebase/use-matches";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -39,13 +40,8 @@ import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
 import { TablePaginationFooter } from "@/components/ui/table-pagination-footer";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AnalyticsAccumulatorTable } from "@/components/analytics-accumulator-table";
-import type { MatchInputRow } from "@/types/domain/match";
 import type { AccumulatorAnalyticsRow, AnalyticsTableRow } from "@/types/analytics";
 import type { DateFilterMode } from "@/types/filters";
-
-type MatchRow = MatchInputRow & {
-  actualWinnerSide: "home" | "away" | "draw" | null;
-};
 
 export function AnalyticsTablesView() {
   const uid = useAuthUid();
@@ -56,27 +52,12 @@ export function AnalyticsTablesView() {
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
   const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
 
-  const mapMatch = useCallback(
-    (id: string, data: Record<string, unknown>): MatchRow => ({
-      id,
-      date: String(data.date ?? ""),
-      homeTeam: String(data.homeTeam ?? ""),
-      awayTeam: String(data.awayTeam ?? ""),
-      competition: String(data.competition ?? ""),
-      country: String(data.country ?? ""),
-      winnerPercent: String(data.winnerPercent ?? "0"),
-      winnerSide: data.winnerSide === "away" ? "away" : "home",
-      actualWinnerSide:
-        data.actualWinnerSide === "home" ||
-        data.actualWinnerSide === "away" ||
-        data.actualWinnerSide === "draw"
-          ? data.actualWinnerSide
-          : null,
-      odds: String(data.odds ?? "0"),
-    }),
-    []
+  const { rows: matches, error: matchesError } = useMatches<MatchInputWithResultRow>(
+    uid,
+    mapMatchInputWithResultRow,
+    "date",
+    "desc"
   );
-  const { rows: matches, error: matchesError } = useMatches(uid, mapMatch, "date", "desc");
   const { betsState, error: betsStateError } = useBetsState(uid);
   const listenerError = matchesError ?? betsStateError ?? null;
 
@@ -99,7 +80,7 @@ export function AnalyticsTablesView() {
 
       const selected = acc.matchIds
         .map((id) => matchesById.get(id))
-        .filter((item): item is MatchRow => Boolean(item));
+        .filter((item): item is MatchInputWithResultRow => Boolean(item));
       if (!selected.length) {
         return;
       }
@@ -190,7 +171,7 @@ export function AnalyticsTablesView() {
     return betsState.accumulators.map((accumulator, index) => {
       const selected = accumulator.matchIds
         .map((matchId) => matchesById.get(matchId))
-        .filter((item): item is MatchRow => Boolean(item));
+        .filter((item): item is MatchInputWithResultRow => Boolean(item));
 
       let allWon = true;
       let combinedOdds = 1;

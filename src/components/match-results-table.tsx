@@ -17,6 +17,7 @@ import {
 import type { DateRange } from "react-day-picker";
 
 import { auth, db, isFirebaseConfigured } from "@/lib/firebase";
+import { mapMatchResultRow } from "@/hooks/firebase/match-mappers";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
@@ -73,22 +74,9 @@ export function MatchResultsTable() {
     const unsubscribe = onSnapshot(
       matchesQuery,
       (snapshot) => {
-        const nextRows: MatchResultRow[] = snapshot.docs.map((item) => {
-          const data = item.data();
-          return {
-            id: item.id,
-            date: String(data.date ?? ""),
-            homeTeam: String(data.homeTeam ?? ""),
-            awayTeam: String(data.awayTeam ?? ""),
-            winnerSide: data.winnerSide === "away" ? "away" : "home",
-            actualWinnerSide:
-              data.actualWinnerSide === "home" ||
-              data.actualWinnerSide === "away" ||
-              data.actualWinnerSide === "draw"
-                ? data.actualWinnerSide
-                : null,
-          };
-        });
+        const nextRows: MatchResultRow[] = snapshot.docs.map((item) =>
+          mapMatchResultRow(item.id, item.data() as Record<string, unknown>)
+        );
 
         setRows(nextRows);
         setListenerError(null);

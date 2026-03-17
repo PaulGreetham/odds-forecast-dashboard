@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Area, CartesianGrid, ComposedChart, Legend, Line, XAxis, YAxis } from "recharts";
 import { ChevronDownIcon } from "lucide-react";
 
@@ -22,16 +22,12 @@ import { formatDateDisplay, parseDateKey, toDateKey } from "@/lib/date-utils";
 import { formatEuroSigned } from "@/lib/number-format";
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { useBetsState } from "@/hooks/firebase/use-bets-state";
+import { mapMatchOutcomeRow, type MatchOutcomeRow } from "@/hooks/firebase/match-mappers";
 import { useMatches } from "@/hooks/firebase/use-matches";
 import type { BetsState } from "@/types/domain/bets";
-import type { MatchBase } from "@/types/domain/match";
 import type { ProfitRow } from "@/types/analytics";
 
 type TotalsRangeMode = "7d" | "30d" | "90d" | "180d" | "365d" | "all";
-
-type MatchRow = Pick<MatchBase, "id" | "date" | "odds" | "winnerSide"> & {
-  actualWinnerSide: "home" | "away" | "draw" | null;
-};
 
 const chartConfig = {
   profit: {
@@ -55,22 +51,12 @@ function formatDateTick(value: string) {
 export function AnalyticsTotalProfitAreaChart() {
   const uid = useAuthUid();
   const [rangeMode, setRangeMode] = useState<TotalsRangeMode>("30d");
-  const mapMatch = useCallback(
-    (id: string, data: Record<string, unknown>): MatchRow => ({
-      id,
-      date: String(data.date ?? ""),
-      odds: String(data.odds ?? "0"),
-      winnerSide: data.winnerSide === "away" ? "away" : "home",
-      actualWinnerSide:
-        data.actualWinnerSide === "home" ||
-        data.actualWinnerSide === "away" ||
-        data.actualWinnerSide === "draw"
-          ? data.actualWinnerSide
-          : null,
-    }),
-    []
+  const { rows: matches, error: matchesError } = useMatches<MatchOutcomeRow>(
+    uid,
+    mapMatchOutcomeRow,
+    "date",
+    "asc"
   );
-  const { rows: matches, error: matchesError } = useMatches(uid, mapMatch, "date", "asc");
   const { betsState, error: betsStateError } = useBetsState(uid);
   const listenerError = matchesError ?? betsStateError ?? null;
   const resolvedBetsState: BetsState = betsState;
@@ -115,7 +101,7 @@ export function AnalyticsTotalProfitAreaChart() {
 
       const selected = accumulator.matchIds
         .map((id) => matchesById.get(id))
-        .filter((m): m is MatchRow => Boolean(m));
+        .filter((m): m is MatchOutcomeRow => Boolean(m));
       if (!selected.length) {
         return;
       }
