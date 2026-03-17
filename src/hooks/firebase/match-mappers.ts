@@ -48,6 +48,20 @@ export function mapMatchInputWithResultRow(
   };
 }
 
+export function mapMatchInputRow(id: string, data: Record<string, unknown>): MatchInputRow {
+  return {
+    id,
+    date: String(data.date ?? ""),
+    homeTeam: String(data.homeTeam ?? ""),
+    awayTeam: String(data.awayTeam ?? ""),
+    competition: String(data.competition ?? ""),
+    country: String(data.country ?? ""),
+    winnerPercent: String(data.winnerPercent ?? ""),
+    winnerSide: normalizeWinnerSide(data.winnerSide),
+    odds: String(data.odds ?? ""),
+  };
+}
+
 export function mapMatchResultRow(id: string, data: Record<string, unknown>): MatchResultRow {
   return {
     id,

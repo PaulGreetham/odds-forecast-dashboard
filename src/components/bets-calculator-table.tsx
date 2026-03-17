@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
   doc as firestoreDoc,
@@ -23,12 +22,14 @@ import {
 } from "lucide-react";
 import type { DateRange } from "react-day-picker";
 
-import { auth, db, isFirebaseConfigured } from "@/lib/firebase";
+import { db, isFirebaseConfigured } from "@/lib/firebase";
 import {
   formatDateDisplay,
   formatDateForInput,
   matchesDateFilter,
 } from "@/lib/date-utils";
+import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
+import { mapMatchInputRow } from "@/hooks/firebase/match-mappers";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -78,7 +79,7 @@ const initialAccumulator: DailyAccumulator = {
 };
 
 export function BetsCalculatorTable() {
-  const [uid, setUid] = useState<string | null>(auth?.currentUser?.uid ?? null);
+  const uid = useAuthUid();
   const [rows, setRows] = useState<MatchBet[]>([]);
   const [defaultStake, setDefaultStake] = useState("10");
   const [rowStakes, setRowStakes] = useState<Record<string, string>>({});
@@ -110,17 +111,10 @@ export function BetsCalculatorTable() {
   }, [uid]);
 
   useEffect(() => {
-    if (!auth) {
-      return;
+    if (!uid) {
+      setIsBetsStateHydrated(false);
     }
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUid(user?.uid ?? null);
-      if (!user) {
-        setIsBetsStateHydrated(false);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
+  }, [uid]);
 
   useEffect(() => {
     if (!betsStateDoc) {
@@ -213,17 +207,9 @@ export function BetsCalculatorTable() {
     const unsubscribe = onSnapshot(
       matchesQuery,
       (snapshot) => {
-        const nextRows: MatchBet[] = snapshot.docs.map((item) => {
-          const data = item.data();
-          return {
-            id: item.id,
-            date: String(data.date ?? ""),
-            homeTeam: String(data.homeTeam ?? ""),
-            awayTeam: String(data.awayTeam ?? ""),
-            winnerSide: data.winnerSide === "away" ? "away" : "home",
-            odds: String(data.odds ?? ""),
-          };
-        });
+        const nextRows: MatchBet[] = snapshot.docs.map((item) =>
+          mapMatchInputRow(item.id, item.data() as Record<string, unknown>)
+        );
         setRows(nextRows);
         setRowStakes((prev) => {
           const next: Record<string, string> = {};

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
 import {
   type ColumnFiltersState,
   type ColumnDef,
@@ -26,7 +25,9 @@ import {
   updateDoc,
 } from "firebase/firestore";
 
-import { auth, db, isFirebaseConfigured } from "@/lib/firebase";
+import { db, isFirebaseConfigured } from "@/lib/firebase";
+import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
+import { mapMatchInputRow } from "@/hooks/firebase/match-mappers";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,6 +44,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { TablePaginationFooter } from "@/components/ui/table-pagination-footer";
+import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
 import {
   Table,
   TableBody,
@@ -52,9 +54,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  ArrowDownIcon,
-  ArrowUpDownIcon,
-  ArrowUpIcon,
   CalendarIcon,
   PencilIcon,
   Settings2Icon,
@@ -62,7 +61,7 @@ import {
 import type { DateRange } from "react-day-picker";
 import type { MatchInputRow } from "@/types/domain/match";
 import type { DateFilterMode } from "@/types/filters";
-import { endOfDay, formatDateDisplay, formatDateForInput, startOfDay } from "@/lib/date-utils";
+import { formatDateDisplay, formatDateForInput, matchesDateFilter } from "@/lib/date-utils";
 
 type MatchRow = MatchInputRow;
 
@@ -80,7 +79,7 @@ const initialForm: MatchFormValues = {
 };
 
 export function MatchOddsFormTable() {
-  const [uid, setUid] = useState<string | null>(auth?.currentUser?.uid ?? null);
+  const uid = useAuthUid();
   const [form, setForm] = useState<MatchFormValues>(initialForm);
   const [rows, setRows] = useState<MatchRow[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -104,18 +103,6 @@ export function MatchOddsFormTable() {
   }, [uid]);
 
   useEffect(() => {
-    if (!auth) {
-      return;
-    }
-
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUid(user?.uid ?? null);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
     if (!matchesCollection) {
       return;
     }
@@ -124,20 +111,9 @@ export function MatchOddsFormTable() {
     const unsubscribe = onSnapshot(
       matchesQuery,
       (snapshot) => {
-        const nextRows: MatchRow[] = snapshot.docs.map((item) => {
-          const data = item.data();
-          return {
-            id: item.id,
-            date: String(data.date ?? ""),
-            homeTeam: String(data.homeTeam ?? ""),
-            awayTeam: String(data.awayTeam ?? ""),
-            competition: String(data.competition ?? ""),
-            country: String(data.country ?? ""),
-            winnerPercent: String(data.winnerPercent ?? ""),
-            winnerSide: data.winnerSide === "away" ? "away" : "home",
-            odds: String(data.odds ?? ""),
-          };
-        });
+        const nextRows: MatchRow[] = snapshot.docs.map((item) =>
+          mapMatchInputRow(item.id, item.data() as Record<string, unknown>)
+        );
         setRows(nextRows);
       },
       () => {
@@ -235,103 +211,23 @@ export function MatchOddsFormTable() {
       : row.homeTeam || "Home Team";
   }
 
-  function parseStoredDate(value: string) {
-    if (!value) {
-      return null;
-    }
-
-    const parts = value.split("-");
-    if (parts.length === 3) {
-      const year = Number(parts[0]);
-      const month = Number(parts[1]);
-      const day = Number(parts[2]);
-      if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
-        const parsed = new Date(year, month - 1, day);
-        if (!Number.isNaN(parsed.getTime())) {
-          return parsed;
-        }
-      }
-    }
-
-    const fallback = new Date(value);
-    return Number.isNaN(fallback.getTime()) ? null : fallback;
-  }
-
-  const dateFilteredRows = useMemo(() => {
-    if (filterMode === "date" && !filterDate) {
-      return rows;
-    }
-
-    if (filterMode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
-      return rows;
-    }
-
-    return rows.filter((row) => {
-      const rowDate = parseStoredDate(row.date);
-      if (!rowDate) {
-        return false;
-      }
-
-      if (filterMode === "range" && (filterDateRange?.from || filterDateRange?.to)) {
-        const from = filterDateRange?.from ? startOfDay(filterDateRange.from) : null;
-        const to = filterDateRange?.to ? endOfDay(filterDateRange.to) : from;
-        if (from && rowDate < from) {
-          return false;
-        }
-        if (to && rowDate > to) {
-          return false;
-        }
-        return true;
-      }
-
-      if (filterMode === "date" && filterDate) {
-        const target = formatDateForInput(filterDate);
-        return row.date === target;
-      }
-
-      return true;
-    });
-  }, [filterDate, filterDateRange, filterMode, rows]);
-
-  function renderSortIcon(sortState: false | "asc" | "desc") {
-    if (sortState === "asc") {
-      return <ArrowUpIcon className="size-4" />;
-    }
-    if (sortState === "desc") {
-      return <ArrowDownIcon className="size-4" />;
-    }
-    return <ArrowUpDownIcon className="size-4 opacity-60" />;
-  }
+  const dateFilteredRows = useMemo(
+    () =>
+      rows.filter((row) =>
+        matchesDateFilter(row.date, filterMode, filterDate, filterDateRange)
+      ),
+    [filterDate, filterDateRange, filterMode, rows]
+  );
 
   const columns: ColumnDef<MatchRow>[] = [
     {
       accessorKey: "date",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Date
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => <SortableHeaderButton label="Date" column={column} />,
       cell: ({ row }) => formatDateDisplay(row.original.date),
     },
     {
       accessorKey: "homeTeam",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Home Team
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => <SortableHeaderButton label="Home Team" column={column} />,
       cell: ({ row }) => (
         <span
           className={cn(
@@ -346,17 +242,7 @@ export function MatchOddsFormTable() {
     },
     {
       accessorKey: "awayTeam",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Away Team
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => <SortableHeaderButton label="Away Team" column={column} />,
       cell: ({ row }) => (
         <span
           className={cn(
@@ -371,59 +257,19 @@ export function MatchOddsFormTable() {
     },
     {
       accessorKey: "competition",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Competition
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => <SortableHeaderButton label="Competition" column={column} />,
     },
     {
       accessorKey: "country",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Country
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => <SortableHeaderButton label="Country" column={column} />,
     },
     {
       accessorKey: "winnerPercent",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Win %
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => <SortableHeaderButton label="Win %" column={column} />,
     },
     {
       accessorKey: "odds",
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="-ml-3 h-8"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Odds
-          {renderSortIcon(column.getIsSorted())}
-        </Button>
-      ),
+      header: ({ column }) => <SortableHeaderButton label="Odds" column={column} />,
     },
     {
       id: "actions",
