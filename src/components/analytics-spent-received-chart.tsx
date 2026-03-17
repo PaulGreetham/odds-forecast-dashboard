@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, TrendingDownIcon, TrendingUpIcon } from "lucide-react";
 
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { useBetsState } from "@/hooks/firebase/use-bets-state";
@@ -17,6 +17,7 @@ import { useMatches } from "@/hooks/firebase/use-matches";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -135,6 +136,16 @@ function formatBucketTooltip(value: string, viewMode: ChartViewMode) {
 function formatCurrency(value: number) {
   const sign = value < 0 ? "-" : "";
   return `${sign}€${Math.abs(value).toFixed(2)}`;
+}
+
+function calculatePercentChange(current: number, previous: number) {
+  if (!Number.isFinite(current) || !Number.isFinite(previous)) {
+    return null;
+  }
+  if (previous === 0) {
+    return current === 0 ? 0 : null;
+  }
+  return ((current - previous) / Math.abs(previous)) * 100;
 }
 
 function CurrencyTicker({ value }: { value: number }) {
@@ -445,6 +456,145 @@ export function AnalyticsSpentReceivedChart() {
     topSummary.profit,
   ]);
 
+  const previousChartData = useMemo(() => {
+    if (!chartData.length) {
+      return [] as ChartRow[];
+    }
+    const currentStart = parseDateKey(chartData[0]?.date ?? "");
+    if (!currentStart) {
+      return [] as ChartRow[];
+    }
+    const days = chartData.length;
+    const prevEnd = new Date(currentStart);
+    prevEnd.setDate(currentStart.getDate() - 1);
+    const prevStart = new Date(prevEnd);
+    prevStart.setDate(prevEnd.getDate() - (days - 1));
+
+    const byDate = new Map(fullChartData.map((row) => [row.date, row]));
+    const sequence: ChartRow[] = [];
+    const current = new Date(prevStart);
+    while (current <= prevEnd) {
+      const key = toDateKey(current);
+      sequence.push(byDate.get(key) ?? { date: key, spent: 0, received: 0 });
+      current.setDate(current.getDate() + 1);
+    }
+    return sequence;
+  }, [chartData, fullChartData]);
+
+  const previousMetricData = useMemo(
+    () => previousChartData.filter((row) => row.spent > 0 || row.received > 0),
+    [previousChartData]
+  );
+  const previousBettingDayRows = useMemo(
+    () => previousChartData.filter((row) => row.spent > 0),
+    [previousChartData]
+  );
+  const previousSummary = useMemo(
+    () => summarizeMetrics(previousMetricData, rows),
+    [previousMetricData, rows]
+  );
+
+  const previousExtendedMetrics = useMemo(() => {
+    const metricDateKeys = new Set(previousMetricData.map((row) => row.date));
+    const matchesById = new Map(rows.map((row) => [row.id, row]));
+
+    const singlesCount = rows.reduce((count, row) => {
+      if (!metricDateKeys.has(row.date)) {
+        return count;
+      }
+      const stakeValue = Number(
+        betsState.rowStakes[row.id] && betsState.rowStakes[row.id] !== ""
+          ? betsState.rowStakes[row.id]
+          : betsState.defaultStake
+      );
+      return Number.isFinite(stakeValue) && stakeValue > 0 ? count + 1 : count;
+    }, 0);
+
+    const accumulatorsCount = betsState.accumulators.reduce((count, accumulator) => {
+      if (!accumulator.matchIds.length) {
+        return count;
+      }
+      const stakeValue = Number(accumulator.stake);
+      if (!Number.isFinite(stakeValue) || stakeValue <= 0) {
+        return count;
+      }
+      const accumulatorMatches = accumulator.matchIds
+        .map((id) => matchesById.get(id))
+        .filter((match): match is MatchAnalyticsRow => Boolean(match));
+      if (!accumulatorMatches.length) {
+        return count;
+      }
+      const day = accumulator.day ?? accumulatorMatches[0].date;
+      if (!day || !metricDateKeys.has(day)) {
+        return count;
+      }
+      return count + 1;
+    }, 0);
+
+    const totalBets = singlesCount + accumulatorsCount;
+    const averageProfitPerBet = totalBets > 0 ? previousSummary.profit / totalBets : 0;
+
+    const dailyReturns = previousBettingDayRows.map(
+      (row) => ((row.received - row.spent) / row.spent) * 100
+    );
+    const bestDailyReturn = dailyReturns.length > 0 ? Math.max(...dailyReturns) : 0;
+    const worstDailyReturn = dailyReturns.length > 0 ? Math.min(...dailyReturns) : 0;
+
+    return {
+      averageProfitPerBet,
+      bestDailyReturn,
+      worstDailyReturn,
+    };
+  }, [
+    betsState.accumulators,
+    betsState.defaultStake,
+    betsState.rowStakes,
+    previousBettingDayRows,
+    previousMetricData,
+    previousSummary.profit,
+    rows,
+  ]);
+
+  const currentReturnPercent =
+    topSummary.spent > 0 ? ((topSummary.received - topSummary.spent) / topSummary.spent) * 100 : 0;
+  const previousReturnPercent =
+    previousSummary.spent > 0
+      ? ((previousSummary.received - previousSummary.spent) / previousSummary.spent) * 100
+      : 0;
+
+  const metricTrends = {
+    profit: calculatePercentChange(topSummary.profit, previousSummary.profit),
+    spent: calculatePercentChange(topSummary.spent, previousSummary.spent),
+    received: calculatePercentChange(topSummary.received, previousSummary.received),
+    avgProfitPerBet: calculatePercentChange(
+      topExtendedMetrics.averageProfitPerBet,
+      previousExtendedMetrics.averageProfitPerBet
+    ),
+    returnPercent: calculatePercentChange(currentReturnPercent, previousReturnPercent),
+    winnerPercent: calculatePercentChange(topSummary.successPercent, previousSummary.successPercent),
+    bestDaily: calculatePercentChange(
+      topExtendedMetrics.bestDailyReturn,
+      previousExtendedMetrics.bestDailyReturn
+    ),
+    worstDaily: calculatePercentChange(
+      topExtendedMetrics.worstDailyReturn,
+      previousExtendedMetrics.worstDailyReturn
+    ),
+  };
+
+  const renderTrendIndicator = (change: number | null) => {
+    if (change === null) {
+      return null;
+    }
+    const positive = change >= 0;
+    return (
+      <div className={`flex items-center gap-1 text-xs ${positive ? "text-emerald-500" : "text-red-500"}`}>
+        {positive ? <TrendingUpIcon className="size-4" /> : <TrendingDownIcon className="size-4" />}
+        {`${positive ? "+" : ""}${change.toFixed(1)}%`}
+      </div>
+    );
+  };
+
   const rangeLabel =
     rangeMode === "7d"
       ? "Last Week"
@@ -499,6 +649,7 @@ export function AnalyticsSpentReceivedChart() {
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                   <CurrencyTicker value={topSummary.profit} />
                 </CardTitle>
+                <CardAction>{renderTrendIndicator(metricTrends.profit)}</CardAction>
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
                 <div className="line-clamp-1 flex gap-2 font-medium">
@@ -514,6 +665,7 @@ export function AnalyticsSpentReceivedChart() {
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                   <CurrencyTicker value={topSummary.spent} />
                 </CardTitle>
+                <CardAction>{renderTrendIndicator(metricTrends.spent)}</CardAction>
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
                 <div className="line-clamp-1 flex gap-2 font-medium">Stake outflow</div>
@@ -527,6 +679,7 @@ export function AnalyticsSpentReceivedChart() {
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                   <CurrencyTicker value={topSummary.received} />
                 </CardTitle>
+                <CardAction>{renderTrendIndicator(metricTrends.received)}</CardAction>
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
                 <div className="line-clamp-1 flex gap-2 font-medium">Total returns received</div>
@@ -540,6 +693,7 @@ export function AnalyticsSpentReceivedChart() {
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                   <CurrencyTicker value={topExtendedMetrics.averageProfitPerBet} />
                 </CardTitle>
+                <CardAction>{renderTrendIndicator(metricTrends.avgProfitPerBet)}</CardAction>
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
                 <div className="line-clamp-1 flex gap-2 font-medium">
@@ -551,10 +705,31 @@ export function AnalyticsSpentReceivedChart() {
 
             <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
               <CardHeader>
+                <CardDescription>Return %</CardDescription>
+                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+                  <PercentTicker
+                    value={
+                      topSummary.spent > 0
+                        ? ((topSummary.received - topSummary.spent) / topSummary.spent) * 100
+                        : 0
+                    }
+                  />
+                </CardTitle>
+                <CardAction>{renderTrendIndicator(metricTrends.returnPercent)}</CardAction>
+              </CardHeader>
+              <CardFooter className="flex-col items-start gap-1.5 text-sm">
+                <div className="line-clamp-1 flex gap-2 font-medium">Overall period ROI</div>
+                <div className="text-muted-foreground">(Received minus spent) / spent</div>
+              </CardFooter>
+            </Card>
+
+            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
+              <CardHeader>
                 <CardDescription>Winner Prediction %</CardDescription>
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                   <PercentTicker value={topSummary.successPercent} />
                 </CardTitle>
+                <CardAction>{renderTrendIndicator(metricTrends.winnerPercent)}</CardAction>
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
                 <div className="line-clamp-1 flex gap-2 font-medium">
@@ -566,25 +741,11 @@ export function AnalyticsSpentReceivedChart() {
 
             <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
               <CardHeader>
-                <CardDescription>Daily Return % Average</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  <PercentTicker value={topExtendedMetrics.dailyReturnAverage} />
-                </CardTitle>
-              </CardHeader>
-              <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                <div className="line-clamp-1 flex gap-2 font-medium">
-                  Mean daily ROI ({topExtendedMetrics.bettingDays} betting days)
-                </div>
-                <div className="text-muted-foreground">Only days with stake placed are included</div>
-              </CardFooter>
-            </Card>
-
-            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-              <CardHeader>
                 <CardDescription>Best Daily Return %</CardDescription>
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                   <PercentTicker value={topExtendedMetrics.bestDailyReturn} />
                 </CardTitle>
+                <CardAction>{renderTrendIndicator(metricTrends.bestDaily)}</CardAction>
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
                 <div className="line-clamp-1 flex gap-2 font-medium">Highest day in range</div>
@@ -598,6 +759,7 @@ export function AnalyticsSpentReceivedChart() {
                 <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
                   <PercentTicker value={topExtendedMetrics.worstDailyReturn} />
                 </CardTitle>
+                <CardAction>{renderTrendIndicator(metricTrends.worstDaily)}</CardAction>
               </CardHeader>
               <CardFooter className="flex-col items-start gap-1.5 text-sm">
                 <div className="line-clamp-1 flex gap-2 font-medium">Lowest day in range</div>
