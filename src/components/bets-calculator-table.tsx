@@ -16,9 +16,6 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import {
-  NotebookPenIcon,
-} from "lucide-react";
 import type { DateRange } from "react-day-picker";
 
 import { db, isFirebaseConfigured } from "@/lib/firebase";
@@ -37,6 +34,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DateFilterToolbar } from "@/components/ui/date-filter-toolbar";
 import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
+import { AccumulatorNotePopover } from "@/components/bets/accumulator-note-popover";
+import { AccumulatorRowActions } from "@/components/bets/accumulator-row-actions";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -46,7 +45,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -338,6 +336,14 @@ export function BetsCalculatorTable() {
     );
     setSavedNoteId(accumulatorId);
     setOpenNotePopoverId(null);
+  }
+
+  function handleNoteDraftChange(accumulatorId: string, value: string) {
+    setSavedNoteId((current) => (current === accumulatorId ? null : current));
+    setNoteDrafts((prev) => ({
+      ...prev,
+      [accumulatorId]: value,
+    }));
   }
 
   function canToggleMatchForAccumulator(accumulator: DailyAccumulator, row: MatchBet) {
@@ -798,101 +804,32 @@ export function BetsCalculatorTable() {
                     </TableCell>
                     <TableCell>{summary.matches.length ? summary.profit.toFixed(2) : "0.00"}</TableCell>
                     <TableCell>
-                      <Popover
-                        open={openNotePopoverId === summary.id}
-                        onOpenChange={(open) => {
-                          setOpenNotePopoverId(open ? summary.id : null);
-                        }}
-                      >
-                        <PopoverTrigger
-                          render={
-                            <Button
-                              type="button"
-                              size="icon-sm"
-                              variant={summary.note?.trim() ? "default" : "outline"}
-                            >
-                              <NotebookPenIcon className="size-4" />
-                              <span className="sr-only">Edit accumulator note</span>
-                            </Button>
-                          }
-                        />
-                        <PopoverContent align="end" className="w-80 p-3">
-                          <div className="space-y-2">
-                            <Label className="text-xs text-muted-foreground">
-                              {accumulatorNameById[summary.id] ?? summary.name} note
-                            </Label>
-                            <textarea
-                              value={noteDrafts[summary.id] ?? ""}
-                              onChange={(event) => {
-                                setSavedNoteId((current) =>
-                                  current === summary.id ? null : current
-                                );
-                                setNoteDrafts((prev) => ({
-                                  ...prev,
-                                  [summary.id]: event.target.value,
-                                }));
-                              }}
-                              placeholder="Add notes for this accumulator..."
-                              className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                            />
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-muted-foreground">
-                                {savedNoteId === summary.id ? "Saved" : " "}
-                              </span>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => clearAccumulatorNote(summary.id)}
-                                  disabled={
-                                    (noteDrafts[summary.id] ?? "").trim().length === 0 &&
-                                    (summary.note ?? "").trim().length === 0
-                                  }
-                                >
-                                  Clear
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={() => saveAccumulatorNote(summary.id)}
-                                >
-                                  Save note
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-                        </PopoverContent>
-                      </Popover>
+                      <AccumulatorNotePopover
+                        displayName={accumulatorNameById[summary.id] ?? summary.name}
+                        note={summary.note ?? ""}
+                        noteDraft={noteDrafts[summary.id] ?? ""}
+                        isOpen={openNotePopoverId === summary.id}
+                        isSaved={savedNoteId === summary.id}
+                        onOpenChange={(open) => setOpenNotePopoverId(open ? summary.id : null)}
+                        onDraftChange={(value) => handleNoteDraftChange(summary.id, value)}
+                        onSave={() => saveAccumulatorNote(summary.id)}
+                        onClear={() => clearAccumulatorNote(summary.id)}
+                      />
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            setAccumulators((prev) =>
-                              prev.map((accumulator) =>
-                                accumulator.id === summary.id
-                                  ? { ...accumulator, matchIds: [], day: null }
-                                  : accumulator
-                              )
+                      <AccumulatorRowActions
+                        hasMatches={summary.matches.length > 0}
+                        onClear={() =>
+                          setAccumulators((prev) =>
+                            prev.map((accumulator) =>
+                              accumulator.id === summary.id
+                                ? { ...accumulator, matchIds: [], day: null }
+                                : accumulator
                             )
-                          }
-                          disabled={summary.matches.length === 0}
-                        >
-                          Clear
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => removeAccumulator(summary.id)}
-                        >
-                          Remove
-                        </Button>
-                      </div>
+                          )
+                        }
+                        onRemove={() => removeAccumulator(summary.id)}
+                      />
                     </TableCell>
                   </TableRow>
                 ))
