@@ -34,8 +34,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DateFilterToolbar } from "@/components/ui/date-filter-toolbar";
 import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
-import { AccumulatorNotePopover } from "@/components/bets/accumulator-note-popover";
-import { AccumulatorRowActions } from "@/components/bets/accumulator-row-actions";
+import { AccumulatorSummaryRowItem } from "@/components/bets/accumulator-summary-row";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -774,64 +773,35 @@ export function BetsCalculatorTable() {
                 </TableRow>
               ) : (
                 filteredAccumulatorSummaries.map((summary) => (
-                  <TableRow key={summary.id}>
-                    <TableCell>{accumulatorNameById[summary.id] ?? summary.name}</TableCell>
-                    <TableCell>{summary.day ? formatDateDisplay(summary.day) : "-"}</TableCell>
-                    <TableCell>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={summary.stake}
-                        onChange={(event) =>
-                          setAccumulators((prev) =>
-                            prev.map((accumulator) =>
-                              accumulator.id === summary.id
-                                ? { ...accumulator, stake: event.target.value }
-                                : accumulator
-                            )
-                          )
-                        }
-                        className="h-8"
-                      />
-                    </TableCell>
-                    <TableCell>{summary.matches.length}</TableCell>
-                    <TableCell>
-                      {summary.matches.length ? summary.combinedOdds.toFixed(2) : "0.00"}
-                    </TableCell>
-                    <TableCell>
-                      {summary.matches.length ? summary.potentialReturn.toFixed(2) : "0.00"}
-                    </TableCell>
-                    <TableCell>{summary.matches.length ? summary.profit.toFixed(2) : "0.00"}</TableCell>
-                    <TableCell>
-                      <AccumulatorNotePopover
-                        displayName={accumulatorNameById[summary.id] ?? summary.name}
-                        note={summary.note ?? ""}
-                        noteDraft={noteDrafts[summary.id] ?? ""}
-                        isOpen={openNotePopoverId === summary.id}
-                        isSaved={savedNoteId === summary.id}
-                        onOpenChange={(open) => setOpenNotePopoverId(open ? summary.id : null)}
-                        onDraftChange={(value) => handleNoteDraftChange(summary.id, value)}
-                        onSave={() => saveAccumulatorNote(summary.id)}
-                        onClear={() => clearAccumulatorNote(summary.id)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <AccumulatorRowActions
-                        hasMatches={summary.matches.length > 0}
-                        onClear={() =>
-                          setAccumulators((prev) =>
-                            prev.map((accumulator) =>
-                              accumulator.id === summary.id
-                                ? { ...accumulator, matchIds: [], day: null }
-                                : accumulator
-                            )
-                          )
-                        }
-                        onRemove={() => removeAccumulator(summary.id)}
-                      />
-                    </TableCell>
-                  </TableRow>
+                  <AccumulatorSummaryRowItem
+                    key={summary.id}
+                    summary={summary}
+                    displayName={accumulatorNameById[summary.id] ?? summary.name}
+                    noteDraft={noteDrafts[summary.id] ?? ""}
+                    isNoteOpen={openNotePopoverId === summary.id}
+                    isNoteSaved={savedNoteId === summary.id}
+                    onStakeChange={(value) =>
+                      setAccumulators((prev) =>
+                        prev.map((accumulator) =>
+                          accumulator.id === summary.id ? { ...accumulator, stake: value } : accumulator
+                        )
+                      )
+                    }
+                    onNoteOpenChange={(open) => setOpenNotePopoverId(open ? summary.id : null)}
+                    onNoteDraftChange={(value) => handleNoteDraftChange(summary.id, value)}
+                    onNoteSave={() => saveAccumulatorNote(summary.id)}
+                    onNoteClear={() => clearAccumulatorNote(summary.id)}
+                    onClearMatches={() =>
+                      setAccumulators((prev) =>
+                        prev.map((accumulator) =>
+                          accumulator.id === summary.id
+                            ? { ...accumulator, matchIds: [], day: null }
+                            : accumulator
+                        )
+                      )
+                    }
+                    onRemove={() => removeAccumulator(summary.id)}
+                  />
                 ))
               )}
             </TableBody>
