@@ -57,7 +57,13 @@ import {
 import type { AccumulatorLike } from "@/types/domain/bets";
 import type { MatchBase } from "@/types/domain/match";
 import type { DateFilterMode } from "@/types/filters";
-import { buildAccumulatorName, serializeBetsState } from "@/components/bets/bets-utils";
+import {
+  buildAccumulatorName,
+  buildAccumulatorNameMap,
+  buildAccumulatorSummaries,
+  reconcileAccumulatorsWithRows,
+  serializeBetsState,
+} from "@/components/bets/bets-utils";
 
 type MatchBet = MatchBase;
 type DailyAccumulator = AccumulatorLike & { note: string };
@@ -227,19 +233,7 @@ export function BetsCalculatorTable() {
           return next;
         });
         setAccumulators((prev) => {
-          const cleaned = prev.map((accumulator) => {
-            const validIds = accumulator.matchIds.filter((id) =>
-              nextRows.some((row) => row.id === id)
-            );
-            const firstRow = nextRows.find((row) => row.id === validIds[0]);
-            return {
-              ...accumulator,
-              matchIds: validIds,
-              day: firstRow?.date ?? null,
-            };
-          });
-
-          const nextAccumulators = cleaned.length ? cleaned : [initialAccumulator];
+          const nextAccumulators = reconcileAccumulatorsWithRows(prev, nextRows, initialAccumulator);
           setActiveAccumulatorId((currentActiveId) =>
             nextAccumulators.some((item) => item.id === currentActiveId)
               ? currentActiveId
@@ -420,23 +414,7 @@ export function BetsCalculatorTable() {
   }, [filterDate, filterDateRange, filterMode]);
 
   const accumulatorNameById = useMemo(() => {
-    const countsByDay: Record<string, number> = {};
-    const next: Record<string, string> = {};
-
-    accumulators.forEach((accumulator) => {
-      if (!accumulator.day) {
-        // Keep unassigned accumulators as plain names; do not imply day creation.
-        next[accumulator.id] = accumulator.name;
-        return;
-      }
-
-      const dayKey = accumulator.day;
-      const index = (countsByDay[dayKey] ?? 0) + 1;
-      countsByDay[dayKey] = index;
-      next[accumulator.id] = buildAccumulatorName(dayKey, index);
-    });
-
-    return next;
+    return buildAccumulatorNameMap(accumulators);
   }, [accumulators]);
 
   const filteredActiveAccumulators = useMemo(
@@ -461,26 +439,10 @@ export function BetsCalculatorTable() {
     ? accumulators.find((accumulator) => accumulator.id === resolvedActiveAccumulatorId)
     : null;
 
-  const accumulatorSummaries = accumulators.map((accumulator) => {
-    const matches = rows.filter((row) => accumulator.matchIds.includes(row.id));
-    const combinedOdds = matches.reduce((total, row) => {
-      const parsed = Number(row.odds);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        return total;
-      }
-      return total * parsed;
-    }, 1);
-    const stakeValue = Number(accumulator.stake) || 0;
-    const potentialReturn = matches.length ? combinedOdds * stakeValue : 0;
-    const profit = potentialReturn - stakeValue;
-    return {
-      ...accumulator,
-      matches,
-      combinedOdds,
-      potentialReturn,
-      profit,
-    };
-  });
+  const accumulatorSummaries = useMemo(
+    () => buildAccumulatorSummaries(accumulators, rows),
+    [accumulators, rows]
+  );
 
   const filteredAccumulatorSummaries = useMemo(
     () =>
