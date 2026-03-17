@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   type ColumnFiltersState,
   type ColumnDef,
@@ -17,9 +17,6 @@ import {
   addDoc,
   deleteDoc,
   doc,
-  onSnapshot,
-  orderBy,
-  query,
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
@@ -28,6 +25,7 @@ import { isFirebaseConfigured } from "@/lib/firebase";
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { useMatchesCollection } from "@/hooks/firebase/use-matches-collection";
 import { mapMatchInputRow } from "@/hooks/firebase/match-mappers";
+import { useMatches } from "@/hooks/firebase/use-matches";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -81,7 +79,6 @@ const initialForm: MatchFormValues = {
 export function MatchOddsFormTable() {
   const uid = useAuthUid();
   const [form, setForm] = useState<MatchFormValues>(initialForm);
-  const [rows, setRows] = useState<MatchRow[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,28 +92,12 @@ export function MatchOddsFormTable() {
   const [filterMode, setFilterMode] = useState<DateFilterMode>("date");
 
   const matchesCollection = useMatchesCollection(uid);
-
-  useEffect(() => {
-    if (!matchesCollection) {
-      return;
-    }
-
-    const matchesQuery = query(matchesCollection, orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(
-      matchesQuery,
-      (snapshot) => {
-        const nextRows: MatchRow[] = snapshot.docs.map((item) =>
-          mapMatchInputRow(item.id, item.data() as Record<string, unknown>)
-        );
-        setRows(nextRows);
-      },
-      () => {
-        setError("Matches could not be loaded due to Firestore permissions.");
-      }
-    );
-
-    return () => unsubscribe();
-  }, [matchesCollection]);
+  const { rows, error: matchesError } = useMatches<MatchRow>(
+    uid,
+    mapMatchInputRow,
+    "createdAt",
+    "desc"
+  );
 
   function handleChange(field: keyof MatchFormValues, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -534,7 +515,9 @@ export function MatchOddsFormTable() {
               </div>
             </div>
           </form>
-          {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
+          {error || matchesError ? (
+            <p className="mt-3 text-sm text-destructive">{error ?? matchesError}</p>
+          ) : null}
           {!isFirebaseConfigured ? (
             <p className="mt-3 text-sm text-muted-foreground">
               Firebase is not configured.

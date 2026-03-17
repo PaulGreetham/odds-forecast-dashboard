@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -16,6 +16,7 @@ import { useBetsState } from "@/hooks/firebase/use-bets-state";
 import { mapMatchOutcomeRow, type MatchOutcomeRow } from "@/hooks/firebase/match-mappers";
 import { useMatches } from "@/hooks/firebase/use-matches";
 import { Button } from "@/components/ui/button";
+import { AnalyticsRangeSelect } from "@/components/ui/analytics-range-select";
 import {
   Card,
   CardAction,
@@ -40,11 +41,10 @@ import {
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { formatDateDisplay, parseDateKey, toDateKey } from "@/lib/date-utils";
 import {
-  ANALYTICS_RANGE_OPTIONS,
-  getAnalyticsRangeLabel,
-  resolveAnalyticsRangeStartDate,
   type AnalyticsRangeMode,
 } from "@/lib/analytics-range";
+import { aggregateDailySpentReceived } from "@/lib/analytics-aggregation";
+import { buildDailySeriesInRange } from "@/lib/analytics-series";
 import { formatEuroSigned } from "@/lib/number-format";
 import type { ChartRow, MetricsSummary } from "@/types/analytics";
 
@@ -182,6 +182,36 @@ function PercentTicker({ value }: { value: number }) {
   );
 }
 
+function MetricsStatCard({
+  description,
+  value,
+  trend,
+  headline,
+  subline,
+}: {
+  description: string;
+  value: ReactNode;
+  trend: ReactNode;
+  headline: ReactNode;
+  subline: ReactNode;
+}) {
+  return (
+    <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
+      <CardHeader>
+        <CardDescription>{description}</CardDescription>
+        <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+          {value}
+        </CardTitle>
+        <CardAction>{trend}</CardAction>
+      </CardHeader>
+      <CardFooter className="flex-col items-start gap-1.5 text-sm">
+        <div className="line-clamp-1 flex gap-2 font-medium">{headline}</div>
+        <div className="text-muted-foreground">{subline}</div>
+      </CardFooter>
+    </Card>
+  );
+}
+
 function summarizeMetrics(chartRows: ChartRow[], matches: MatchOutcomeRow[]): MetricsSummary {
   const totals = chartRows.reduce(
     (acc, row) => {
@@ -289,129 +319,15 @@ export function AnalyticsSpentReceivedChart() {
   const listenerError = matchesError ?? betsStateError ?? null;
 
   const fullChartData = useMemo<ChartRow[]>(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayKey = toDateKey(today);
-
-    const byDate = new Map<string, ChartRow>();
-    const matchesById = new Map(rows.map((row) => [row.id, row]));
-
-    // Singles (per fixture stakes) - only include dates up to today
-    rows.forEach((row) => {
-      if (!row.date || row.date > todayKey) {
-        return;
-      }
-
-      const oddsValue = Number(row.odds);
-      const isWinningPrediction =
-        row.actualWinnerSide !== null && row.actualWinnerSide === row.winnerSide;
-      const stakeValue = Number(
-        betsState.rowStakes[row.id] && betsState.rowStakes[row.id] !== ""
-          ? betsState.rowStakes[row.id]
-          : betsState.defaultStake
-      );
-
-      const existing = byDate.get(row.date) ?? {
-        date: row.date,
-        spent: 0,
-        received: 0,
-      };
-
-      if (Number.isFinite(stakeValue) && stakeValue > 0) {
-        existing.spent += stakeValue;
-        if (isWinningPrediction && Number.isFinite(oddsValue) && oddsValue > 0) {
-          existing.received += stakeValue * oddsValue;
-        }
-      }
-
-      byDate.set(row.date, existing);
-    });
-
-    // Accumulators (daily stake on combined odds)
-    betsState.accumulators.forEach((accumulator) => {
-      if (!accumulator.matchIds.length) {
-        return;
-      }
-
-      const stakeValue = Number(accumulator.stake);
-      if (!Number.isFinite(stakeValue) || stakeValue <= 0) {
-        return;
-      }
-
-      const accumulatorMatches = accumulator.matchIds
-        .map((id) => matchesById.get(id))
-        .filter((match): match is MatchOutcomeRow => Boolean(match));
-      if (!accumulatorMatches.length) {
-        return;
-      }
-
-      const day = accumulator.day ?? accumulatorMatches[0].date;
-      if (!day || day > todayKey) {
-        return;
-      }
-
-      const existing = byDate.get(day) ?? {
-        date: day,
-        spent: 0,
-        received: 0,
-      };
-      existing.spent += stakeValue;
-
-      let allWon = true;
-      let combinedOdds = 1;
-      for (const match of accumulatorMatches) {
-        const oddsValue = Number(match.odds);
-        const won = match.actualWinnerSide !== null && match.actualWinnerSide === match.winnerSide;
-        if (!won || !Number.isFinite(oddsValue) || oddsValue <= 0) {
-          allWon = false;
-          break;
-        }
-        combinedOdds *= oddsValue;
-      }
-
-      if (allWon) {
-        existing.received += stakeValue * combinedOdds;
-      }
-
-      byDate.set(day, existing);
-    });
-
-    return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+    return aggregateDailySpentReceived(rows, betsState);
   }, [betsState, rows]);
 
   const chartData = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const maxDate = fullChartData.at(-1)?.date;
-    const dataEndDate = maxDate ? parseDateKey(maxDate) : null;
-    const endDate = dataEndDate && dataEndDate > today ? today : dataEndDate;
-    if (!endDate) {
-      return [];
-    }
-
-    const startDate = resolveAnalyticsRangeStartDate({
-      mode: rangeMode,
-      endDate,
-      firstDateKey: fullChartData[0]?.date,
+    return buildDailySeriesInRange<ChartRow>({
+      rows: fullChartData,
+      rangeMode,
+      createEmptyRow: (date) => ({ date, spent: 0, received: 0 }),
     });
-
-    const byDate = new Map(fullChartData.map((row) => [row.date, row]));
-    const sequence: ChartRow[] = [];
-    const current = new Date(startDate);
-
-    while (current <= endDate && current <= today) {
-      const key = toDateKey(current);
-      const existing = byDate.get(key) ?? {
-        date: key,
-        spent: 0,
-        received: 0,
-      };
-      sequence.push(existing);
-      current.setDate(current.getDate() + 1);
-    }
-
-    return sequence;
   }, [fullChartData, rangeMode]);
   const metricData = chartData.filter((row) => row.spent > 0 || row.received > 0);
   const bettingDayRows = useMemo(
@@ -561,8 +477,6 @@ export function AnalyticsSpentReceivedChart() {
     );
   };
 
-  const rangeLabel = getAnalyticsRangeLabel(rangeMode);
-
   return (
     <div className="space-y-6 pb-6">
       <Card>
@@ -575,151 +489,82 @@ export function AnalyticsSpentReceivedChart() {
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-end gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button type="button" variant="outline" className="w-[180px] justify-between rounded-lg">
-                      {rangeLabel}
-                      <ChevronDownIcon className="size-4 opacity-70" />
-                    </Button>
-                  }
-                />
-                <DropdownMenuContent align="end" className="w-[180px] rounded-xl">
-                  {ANALYTICS_RANGE_OPTIONS.map((option) => (
-                    <DropdownMenuItem key={option.value} onClick={() => setRangeMode(option.value)}>
-                      {option.label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <AnalyticsRangeSelect
+                value={rangeMode}
+                onChange={setRangeMode}
+                triggerClassName="w-[180px] justify-between rounded-lg"
+                contentClassName="w-[180px] rounded-xl"
+                align="end"
+              />
             </div>
           </div>
         </CardHeader>
         <CardContent className="pb-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-              <CardHeader>
-                <CardDescription>Total Profit</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  <CurrencyTicker value={topSummary.profit} />
-                </CardTitle>
-                <CardAction>{renderTrendIndicator(metricTrends.profit)}</CardAction>
-              </CardHeader>
-              <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                <div className="line-clamp-1 flex gap-2 font-medium">
-                  {topSummary.profit >= 0 ? "Positive return" : "Negative return"}
-                </div>
-                <div className="text-muted-foreground">Received minus spent vs previous period</div>
-              </CardFooter>
-            </Card>
-
-            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-              <CardHeader>
-                <CardDescription>Total Spent</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  <CurrencyTicker value={topSummary.spent} />
-                </CardTitle>
-                <CardAction>{renderTrendIndicator(metricTrends.spent)}</CardAction>
-              </CardHeader>
-              <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                <div className="line-clamp-1 flex gap-2 font-medium">Stake outflow</div>
-                <div className="text-muted-foreground">Singles and accumulators</div>
-              </CardFooter>
-            </Card>
-
-            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-              <CardHeader>
-                <CardDescription>Total Received</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  <CurrencyTicker value={topSummary.received} />
-                </CardTitle>
-                <CardAction>{renderTrendIndicator(metricTrends.received)}</CardAction>
-              </CardHeader>
-              <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                <div className="line-clamp-1 flex gap-2 font-medium">Total returns received</div>
-                <div className="text-muted-foreground">Winning singles and accumulators</div>
-              </CardFooter>
-            </Card>
-
-            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-              <CardHeader>
-                <CardDescription>Avg Profit per Bet</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  <CurrencyTicker value={topExtendedMetrics.averageProfitPerBet} />
-                </CardTitle>
-                <CardAction>{renderTrendIndicator(metricTrends.avgProfitPerBet)}</CardAction>
-              </CardHeader>
-              <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                <div className="line-clamp-1 flex gap-2 font-medium">
-                  Across {topExtendedMetrics.totalBets} total bets
-                </div>
-                <div className="text-muted-foreground">Profit divided by singles + accumulators</div>
-              </CardFooter>
-            </Card>
-
-            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-              <CardHeader>
-                <CardDescription>Return %</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  <PercentTicker
-                    value={
-                      topSummary.spent > 0
-                        ? ((topSummary.received - topSummary.spent) / topSummary.spent) * 100
-                        : 0
-                    }
-                  />
-                </CardTitle>
-                <CardAction>{renderTrendIndicator(metricTrends.returnPercent)}</CardAction>
-              </CardHeader>
-              <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                <div className="line-clamp-1 flex gap-2 font-medium">Overall period ROI</div>
-                <div className="text-muted-foreground">(Received minus spent) / spent</div>
-              </CardFooter>
-            </Card>
-
-            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-              <CardHeader>
-                <CardDescription>Winner Prediction %</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  <PercentTicker value={topSummary.successPercent} />
-                </CardTitle>
-                <CardAction>{renderTrendIndicator(metricTrends.winnerPercent)}</CardAction>
-              </CardHeader>
-              <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                <div className="line-clamp-1 flex gap-2 font-medium">
-                  {topSummary.wins} correct from {topSummary.decided} decided
-                </div>
-                <div className="text-muted-foreground">Prediction hit rate in selected period</div>
-              </CardFooter>
-            </Card>
-
-            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-              <CardHeader>
-                <CardDescription>Best Daily Return %</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  <PercentTicker value={topExtendedMetrics.bestDailyReturn} />
-                </CardTitle>
-                <CardAction>{renderTrendIndicator(metricTrends.bestDaily)}</CardAction>
-              </CardHeader>
-              <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                <div className="line-clamp-1 flex gap-2 font-medium">Highest day in range</div>
-                <div className="text-muted-foreground">Only days with stake placed are included</div>
-              </CardFooter>
-            </Card>
-
-            <Card className="@container/card bg-gradient-to-t from-primary/5 to-card shadow-xs">
-              <CardHeader>
-                <CardDescription>Worst Daily Return %</CardDescription>
-                <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-                  <PercentTicker value={topExtendedMetrics.worstDailyReturn} />
-                </CardTitle>
-                <CardAction>{renderTrendIndicator(metricTrends.worstDaily)}</CardAction>
-              </CardHeader>
-              <CardFooter className="flex-col items-start gap-1.5 text-sm">
-                <div className="line-clamp-1 flex gap-2 font-medium">Lowest day in range</div>
-                <div className="text-muted-foreground">Only days with stake placed are included</div>
-              </CardFooter>
-            </Card>
+            <MetricsStatCard
+              description="Total Profit"
+              value={<CurrencyTicker value={topSummary.profit} />}
+              trend={renderTrendIndicator(metricTrends.profit)}
+              headline={topSummary.profit >= 0 ? "Positive return" : "Negative return"}
+              subline="Received minus spent vs previous period"
+            />
+            <MetricsStatCard
+              description="Total Spent"
+              value={<CurrencyTicker value={topSummary.spent} />}
+              trend={renderTrendIndicator(metricTrends.spent)}
+              headline="Stake outflow"
+              subline="Singles and accumulators"
+            />
+            <MetricsStatCard
+              description="Total Received"
+              value={<CurrencyTicker value={topSummary.received} />}
+              trend={renderTrendIndicator(metricTrends.received)}
+              headline="Total returns received"
+              subline="Winning singles and accumulators"
+            />
+            <MetricsStatCard
+              description="Avg Profit per Bet"
+              value={<CurrencyTicker value={topExtendedMetrics.averageProfitPerBet} />}
+              trend={renderTrendIndicator(metricTrends.avgProfitPerBet)}
+              headline={`Across ${topExtendedMetrics.totalBets} total bets`}
+              subline="Profit divided by singles + accumulators"
+            />
+            <MetricsStatCard
+              description="Return %"
+              value={
+                <PercentTicker
+                  value={
+                    topSummary.spent > 0
+                      ? ((topSummary.received - topSummary.spent) / topSummary.spent) * 100
+                      : 0
+                  }
+                />
+              }
+              trend={renderTrendIndicator(metricTrends.returnPercent)}
+              headline="Overall period ROI"
+              subline="(Received minus spent) / spent"
+            />
+            <MetricsStatCard
+              description="Winner Prediction %"
+              value={<PercentTicker value={topSummary.successPercent} />}
+              trend={renderTrendIndicator(metricTrends.winnerPercent)}
+              headline={`${topSummary.wins} correct from ${topSummary.decided} decided`}
+              subline="Prediction hit rate in selected period"
+            />
+            <MetricsStatCard
+              description="Best Daily Return %"
+              value={<PercentTicker value={topExtendedMetrics.bestDailyReturn} />}
+              trend={renderTrendIndicator(metricTrends.bestDaily)}
+              headline="Highest day in range"
+              subline="Only days with stake placed are included"
+            />
+            <MetricsStatCard
+              description="Worst Daily Return %"
+              value={<PercentTicker value={topExtendedMetrics.worstDailyReturn} />}
+              trend={renderTrendIndicator(metricTrends.worstDaily)}
+              headline="Lowest day in range"
+              subline="Only days with stake placed are included"
+            />
           </div>
         </CardContent>
       </Card>

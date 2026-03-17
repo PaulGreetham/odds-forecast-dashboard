@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { doc, onSnapshot, orderBy, query, updateDoc } from "firebase/firestore";
+import { useMemo, useState } from "react";
+import { doc, updateDoc } from "firebase/firestore";
 import {
   type ColumnDef,
   type SortingState,
@@ -19,6 +19,7 @@ import { isFirebaseConfigured } from "@/lib/firebase";
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { mapMatchResultRow } from "@/hooks/firebase/match-mappers";
 import { useMatchesCollection } from "@/hooks/firebase/use-matches-collection";
+import { useMatches } from "@/hooks/firebase/use-matches";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
@@ -39,39 +40,19 @@ import { formatDateDisplay, formatDateForInput, matchesDateFilter } from "@/lib/
 
 export function MatchResultsTable() {
   const uid = useAuthUid();
-  const [rows, setRows] = useState<MatchResultRow[]>([]);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [listenerError, setListenerError] = useState<string | null>(null);
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
   const [filterDateRange, setFilterDateRange] = useState<DateRange | undefined>(undefined);
   const [filterMode, setFilterMode] = useState<DateFilterMode>("date");
 
   const matchesCollection = useMatchesCollection(uid);
-
-  useEffect(() => {
-    if (!matchesCollection) {
-      return;
-    }
-
-    const matchesQuery = query(matchesCollection, orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(
-      matchesQuery,
-      (snapshot) => {
-        const nextRows: MatchResultRow[] = snapshot.docs.map((item) =>
-          mapMatchResultRow(item.id, item.data() as Record<string, unknown>)
-        );
-
-        setRows(nextRows);
-        setListenerError(null);
-      },
-      () => {
-        setListenerError("Results could not be loaded due to Firestore permissions.");
-      }
-    );
-
-    return () => unsubscribe();
-  }, [matchesCollection]);
+  const { rows, error: listenerError } = useMatches<MatchResultRow>(
+    uid,
+    mapMatchResultRow,
+    "createdAt",
+    "desc"
+  );
 
   async function setActualWinner(matchId: string, side: "home" | "away" | "draw") {
     if (!matchesCollection) {

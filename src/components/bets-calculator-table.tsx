@@ -4,8 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   doc as firestoreDoc,
   onSnapshot,
-  orderBy,
-  query,
   setDoc,
 } from "firebase/firestore";
 import {
@@ -25,8 +23,8 @@ import {
   matchesDateFilter,
 } from "@/lib/date-utils";
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
-import { useMatchesCollection } from "@/hooks/firebase/use-matches-collection";
 import { mapMatchInputRow } from "@/hooks/firebase/match-mappers";
+import { useMatches } from "@/hooks/firebase/use-matches";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -77,7 +75,6 @@ const initialAccumulator: DailyAccumulator = {
 
 export function BetsCalculatorTable() {
   const uid = useAuthUid();
-  const [rows, setRows] = useState<MatchBet[]>([]);
   const [defaultStake, setDefaultStake] = useState("10");
   const [rowStakes, setRowStakes] = useState<Record<string, string>>({});
   const [accumulators, setAccumulators] = useState<DailyAccumulator[]>([initialAccumulator]);
@@ -92,8 +89,12 @@ export function BetsCalculatorTable() {
   const [openNotePopoverId, setOpenNotePopoverId] = useState<string | null>(null);
   const [isBetsStateHydrated, setIsBetsStateHydrated] = useState(false);
   const lastSavedStateRef = useRef<string>("");
-
-  const matchesCollection = useMatchesCollection(uid);
+  const { rows, error: matchesError } = useMatches<MatchBet>(
+    uid,
+    mapMatchInputRow,
+    "createdAt",
+    "desc"
+  );
 
   const betsStateDoc = useMemo(() => {
     if (!db || !uid) {
@@ -191,43 +192,30 @@ export function BetsCalculatorTable() {
   }, [betsStateDoc]);
 
   useEffect(() => {
-    if (!matchesCollection) {
-      return;
+    setRowStakes((prev) => {
+      const next: Record<string, string> = {};
+      rows.forEach((row) => {
+        next[row.id] = prev[row.id] ?? defaultStake;
+      });
+      return next;
+    });
+    setAccumulators((prev) => {
+      const nextAccumulators = reconcileAccumulatorsWithRows(prev, rows, initialAccumulator);
+      setActiveAccumulatorId((currentActiveId) =>
+        nextAccumulators.some((item) => item.id === currentActiveId)
+          ? currentActiveId
+          : nextAccumulators[0].id
+      );
+      return nextAccumulators;
+    });
+    setAccumulatorError(null);
+  }, [defaultStake, rows]);
+
+  useEffect(() => {
+    if (matchesError) {
+      setAccumulatorError(matchesError);
     }
-
-    const matchesQuery = query(matchesCollection, orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(
-      matchesQuery,
-      (snapshot) => {
-        const nextRows: MatchBet[] = snapshot.docs.map((item) =>
-          mapMatchInputRow(item.id, item.data() as Record<string, unknown>)
-        );
-        setRows(nextRows);
-        setRowStakes((prev) => {
-          const next: Record<string, string> = {};
-          nextRows.forEach((row) => {
-            next[row.id] = prev[row.id] ?? defaultStake;
-          });
-          return next;
-        });
-        setAccumulators((prev) => {
-          const nextAccumulators = reconcileAccumulatorsWithRows(prev, nextRows, initialAccumulator);
-          setActiveAccumulatorId((currentActiveId) =>
-            nextAccumulators.some((item) => item.id === currentActiveId)
-              ? currentActiveId
-              : nextAccumulators[0].id
-          );
-          return nextAccumulators;
-        });
-        setAccumulatorError(null);
-      },
-      () => {
-        setAccumulatorError("Matches could not be loaded due to Firestore permissions.");
-      }
-    );
-
-    return () => unsubscribe();
-  }, [defaultStake, matchesCollection]);
+  }, [matchesError]);
 
   useEffect(() => {
     setNoteDrafts((prev) => {

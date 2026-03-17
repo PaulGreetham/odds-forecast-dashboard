@@ -2,9 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { Area, CartesianGrid, ComposedChart, Legend, Line, XAxis, YAxis } from "recharts";
-import { ChevronDownIcon } from "lucide-react";
-
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ChartContainer,
@@ -12,19 +9,13 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import { AnalyticsRangeSelect } from "@/components/ui/analytics-range-select";
+import { formatDateDisplay, parseDateKey } from "@/lib/date-utils";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { formatDateDisplay, parseDateKey, toDateKey } from "@/lib/date-utils";
-import {
-  ANALYTICS_RANGE_OPTIONS,
-  getAnalyticsRangeLabel,
-  resolveAnalyticsRangeStartDate,
   type AnalyticsRangeMode,
 } from "@/lib/analytics-range";
+import { aggregateDailySpentReceived } from "@/lib/analytics-aggregation";
+import { buildDailySeriesInRange } from "@/lib/analytics-series";
 import { formatEuroSigned } from "@/lib/number-format";
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { useBetsState } from "@/hooks/firebase/use-bets-state";
@@ -66,105 +57,18 @@ export function AnalyticsTotalProfitAreaChart() {
   const resolvedBetsState: BetsState = betsState;
 
   const fullProfitData = useMemo<ProfitRow[]>(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayKey = toDateKey(today);
-
-    const byDate = new Map<string, ProfitRow>();
-    const matchesById = new Map(matches.map((row) => [row.id, row]));
-
-    matches.forEach((row) => {
-      if (!row.date || row.date > todayKey) {
-        return;
-      }
-      const stake = Number(
-        resolvedBetsState.rowStakes[row.id] && resolvedBetsState.rowStakes[row.id] !== ""
-          ? resolvedBetsState.rowStakes[row.id]
-          : resolvedBetsState.defaultStake
-      );
-      if (!Number.isFinite(stake) || stake <= 0) {
-        return;
-      }
-
-      const odds = Number(row.odds);
-      const won = row.actualWinnerSide !== null && row.actualWinnerSide === row.winnerSide;
-      const received = won && Number.isFinite(odds) && odds > 0 ? stake * odds : 0;
-
-      const current = byDate.get(row.date) ?? { date: row.date, spent: 0, received: 0, profit: 0 };
-      current.spent += stake;
-      current.received += received;
-      current.profit = current.received - current.spent;
-      byDate.set(row.date, current);
-    });
-
-    resolvedBetsState.accumulators.forEach((accumulator) => {
-      const stake = Number(accumulator.stake);
-      if (!Number.isFinite(stake) || stake <= 0 || !accumulator.matchIds.length) {
-        return;
-      }
-
-      const selected = accumulator.matchIds
-        .map((id) => matchesById.get(id))
-        .filter((m): m is MatchOutcomeRow => Boolean(m));
-      if (!selected.length) {
-        return;
-      }
-
-      const day = accumulator.day ?? selected[0].date;
-      if (!day || day > todayKey) {
-        return;
-      }
-
-      let allWon = true;
-      let combinedOdds = 1;
-      for (const row of selected) {
-        const odds = Number(row.odds);
-        const won = row.actualWinnerSide !== null && row.actualWinnerSide === row.winnerSide;
-        if (!won || !Number.isFinite(odds) || odds <= 0) {
-          allWon = false;
-          break;
-        }
-        combinedOdds *= odds;
-      }
-
-      const received = allWon ? stake * combinedOdds : 0;
-      const current = byDate.get(day) ?? { date: day, spent: 0, received: 0, profit: 0 };
-      current.spent += stake;
-      current.received += received;
-      current.profit = current.received - current.spent;
-      byDate.set(day, current);
-    });
-
-    return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+    return aggregateDailySpentReceived(matches, resolvedBetsState).map((row) => ({
+      ...row,
+      profit: row.received - row.spent,
+    }));
   }, [matches, resolvedBetsState]);
 
   const chartData = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const maxDate = fullProfitData.at(-1)?.date;
-    const dataEndDate = maxDate ? parseDateKey(maxDate) : null;
-    const endDate = dataEndDate && dataEndDate > today ? today : dataEndDate;
-    if (!endDate) {
-      return [];
-    }
-
-    const startDate = resolveAnalyticsRangeStartDate({
-      mode: rangeMode,
-      endDate,
-      firstDateKey: fullProfitData[0]?.date,
+    return buildDailySeriesInRange<ProfitRow>({
+      rows: fullProfitData,
+      rangeMode,
+      createEmptyRow: (date) => ({ date, spent: 0, received: 0, profit: 0 }),
     });
-
-    const byDate = new Map(fullProfitData.map((row) => [row.date, row]));
-    const next: ProfitRow[] = [];
-    const current = new Date(startDate);
-
-    while (current <= endDate && current <= today) {
-      const key = toDateKey(current);
-      next.push(byDate.get(key) ?? { date: key, spent: 0, received: 0, profit: 0 });
-      current.setDate(current.getDate() + 1);
-    }
-    return next;
   }, [fullProfitData, rangeMode]);
 
   const totalProfit = useMemo(
@@ -201,8 +105,6 @@ export function AnalyticsTotalProfitAreaChart() {
     return [min - padding, max + padding];
   }, [chartData]);
 
-  const rangeLabel = getAnalyticsRangeLabel(rangeMode);
-
   return (
     <Card className="pt-0">
       <CardHeader className="flex items-center gap-2 space-y-0 border-b py-5 sm:flex-row">
@@ -212,27 +114,13 @@ export function AnalyticsTotalProfitAreaChart() {
             Total profit trend for the selected period ({formatEuroSigned(totalProfit)}).
           </CardDescription>
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                type="button"
-                variant="outline"
-                className="ml-auto w-[180px] justify-between rounded-lg"
-              >
-                {rangeLabel}
-                <ChevronDownIcon className="size-4 opacity-70" />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end" className="w-[180px] rounded-xl">
-            {ANALYTICS_RANGE_OPTIONS.map((option) => (
-              <DropdownMenuItem key={option.value} onClick={() => setRangeMode(option.value)}>
-                {option.label}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <AnalyticsRangeSelect
+          value={rangeMode}
+          onChange={setRangeMode}
+          triggerClassName="ml-auto w-[180px] justify-between rounded-lg"
+          contentClassName="w-[180px] rounded-xl"
+          align="end"
+        />
       </CardHeader>
 
       <CardContent className="px-2 pt-4 pb-6 sm:px-6 sm:pt-6">
