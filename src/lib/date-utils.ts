@@ -13,6 +13,20 @@ export function parseDateKey(value: string) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+export function parseStoredDate(value: string) {
+  if (!value) {
+    return null;
+  }
+
+  const parsedKeyDate = parseDateKey(value);
+  if (parsedKeyDate) {
+    return parsedKeyDate;
+  }
+
+  const fallback = new Date(value);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
 export function toDateKey(date: Date) {
   const year = date.getFullYear();
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
@@ -48,5 +62,44 @@ export function startOfDay(value: Date) {
 
 export function endOfDay(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate(), 23, 59, 59, 999);
+}
+
+type DateRangeLike = {
+  from?: Date;
+  to?: Date;
+} | undefined;
+
+export function matchesDateFilter(
+  value: string,
+  mode: "date" | "range",
+  filterDate?: Date,
+  filterDateRange?: DateRangeLike
+) {
+  if (mode === "date" && !filterDate) {
+    return true;
+  }
+
+  if (mode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
+    return true;
+  }
+
+  if (mode === "date" && filterDate) {
+    return value === formatDateForInput(filterDate);
+  }
+
+  const rowDate = parseStoredDate(value);
+  if (!rowDate) {
+    return false;
+  }
+
+  const from = filterDateRange?.from ? startOfDay(filterDateRange.from) : null;
+  const to = filterDateRange?.to ? endOfDay(filterDateRange.to) : from;
+  if (from && rowDate < from) {
+    return false;
+  }
+  if (to && rowDate > to) {
+    return false;
+  }
+  return true;
 }
 

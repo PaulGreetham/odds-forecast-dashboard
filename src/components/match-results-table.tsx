@@ -47,7 +47,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { MatchResultRow } from "@/types/domain/match";
 import type { DateFilterMode } from "@/types/filters";
-import { endOfDay, formatDateDisplay, formatDateForInput, startOfDay } from "@/lib/date-utils";
+import { formatDateDisplay, formatDateForInput, matchesDateFilter } from "@/lib/date-utils";
 
 export function MatchResultsTable() {
   const [uid, setUid] = useState<string | null>(auth?.currentUser?.uid ?? null);
@@ -154,63 +154,10 @@ export function MatchResultsTable() {
     return row.actualWinnerSide === row.winnerSide ? "Successful" : "Unsuccessful";
   }
 
-  function parseStoredDate(value: string) {
-    if (!value) {
-      return null;
-    }
-
-    const parts = value.split("-");
-    if (parts.length === 3) {
-      const year = Number(parts[0]);
-      const month = Number(parts[1]);
-      const day = Number(parts[2]);
-      if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
-        const parsed = new Date(year, month - 1, day);
-        if (!Number.isNaN(parsed.getTime())) {
-          return parsed;
-        }
-      }
-    }
-
-    const fallback = new Date(value);
-    return Number.isNaN(fallback.getTime()) ? null : fallback;
-  }
-
-  const filteredRows = useMemo(() => {
-    if (filterMode === "date" && !filterDate) {
-      return rows;
-    }
-
-    if (filterMode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
-      return rows;
-    }
-
-    return rows.filter((row) => {
-      const rowDate = parseStoredDate(row.date);
-      if (!rowDate) {
-        return false;
-      }
-
-      if (filterMode === "range" && (filterDateRange?.from || filterDateRange?.to)) {
-        const from = filterDateRange?.from ? startOfDay(filterDateRange.from) : null;
-        const to = filterDateRange?.to ? endOfDay(filterDateRange.to) : from;
-        if (from && rowDate < from) {
-          return false;
-        }
-        if (to && rowDate > to) {
-          return false;
-        }
-        return true;
-      }
-
-      if (filterMode === "date" && filterDate) {
-        const target = formatDateForInput(filterDate);
-        return row.date === target;
-      }
-
-      return true;
-    });
-  }, [filterDate, filterDateRange, filterMode, rows]);
+  const filteredRows = useMemo(
+    () => rows.filter((row) => matchesDateFilter(row.date, filterMode, filterDate, filterDateRange)),
+    [filterDate, filterDateRange, filterMode, rows]
+  );
 
   function renderSortIcon(sortState: false | "asc" | "desc") {
     if (sortState === "asc") {

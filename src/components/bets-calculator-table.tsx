@@ -30,10 +30,9 @@ import type { DateRange } from "react-day-picker";
 
 import { auth, db, isFirebaseConfigured } from "@/lib/firebase";
 import {
-  endOfDay,
   formatDateDisplay,
   formatDateForInput,
-  startOfDay,
+  matchesDateFilter,
 } from "@/lib/date-utils";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -308,27 +307,6 @@ export function BetsCalculatorTable() {
     return Number(rowStakes[rowId] ?? defaultStake) || 0;
   }
 
-  function parseStoredDate(value: string) {
-    if (!value) {
-      return null;
-    }
-
-    const parts = value.split("-");
-    if (parts.length === 3) {
-      const year = Number(parts[0]);
-      const month = Number(parts[1]);
-      const day = Number(parts[2]);
-      if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
-        const parsed = new Date(year, month - 1, day);
-        if (!Number.isNaN(parsed.getTime())) {
-          return parsed;
-        }
-      }
-    }
-
-    const fallback = new Date(value);
-    return Number.isNaN(fallback.getTime()) ? null : fallback;
-  }
   function createAccumulator() {
     const seedDay = filterDateSeed ?? formatDateForInput(new Date());
     const nextIndex =
@@ -430,41 +408,10 @@ export function BetsCalculatorTable() {
     );
   }
 
-  const filteredRows = useMemo(() => {
-    if (filterMode === "date" && !filterDate) {
-      return rows;
-    }
-
-    if (filterMode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
-      return rows;
-    }
-
-    return rows.filter((row) => {
-      const rowDate = parseStoredDate(row.date);
-      if (!rowDate) {
-        return false;
-      }
-
-      if (filterMode === "range" && (filterDateRange?.from || filterDateRange?.to)) {
-        const from = filterDateRange?.from ? startOfDay(filterDateRange.from) : null;
-        const to = filterDateRange?.to ? endOfDay(filterDateRange.to) : from;
-        if (from && rowDate < from) {
-          return false;
-        }
-        if (to && rowDate > to) {
-          return false;
-        }
-        return true;
-      }
-
-      if (filterMode === "date" && filterDate) {
-        const target = formatDateForInput(filterDate);
-        return row.date === target;
-      }
-
-      return true;
-    });
-  }, [filterDate, filterDateRange, filterMode, rows]);
+  const filteredRows = useMemo(
+    () => rows.filter((row) => matchesDateFilter(row.date, filterMode, filterDate, filterDateRange)),
+    [filterDate, filterDateRange, filterMode, rows]
+  );
 
   const filterDateSeed = useMemo(() => {
     if (filterMode === "date" && filterDate) {
@@ -496,45 +443,17 @@ export function BetsCalculatorTable() {
     return next;
   }, [accumulators]);
 
-  const filteredActiveAccumulators = useMemo(() => {
-    return accumulators.filter((accumulator) => {
-      // Unassigned accumulators can still be used for the current filter.
-      if (!accumulator.day) {
-        return true;
-      }
-
-      if (filterMode === "date" && !filterDate) {
-        return true;
-      }
-      if (filterMode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
-        return true;
-      }
-
-      const accumulatorDate = parseStoredDate(accumulator.day);
-      if (!accumulatorDate) {
-        return false;
-      }
-
-      if (filterMode === "range" && (filterDateRange?.from || filterDateRange?.to)) {
-        const from = filterDateRange?.from ? startOfDay(filterDateRange.from) : null;
-        const to = filterDateRange?.to ? endOfDay(filterDateRange.to) : from;
-        if (from && accumulatorDate < from) {
-          return false;
+  const filteredActiveAccumulators = useMemo(
+    () =>
+      accumulators.filter((accumulator) => {
+        // Unassigned accumulators can still be used for the current filter.
+        if (!accumulator.day) {
+          return true;
         }
-        if (to && accumulatorDate > to) {
-          return false;
-        }
-        return true;
-      }
-
-      if (filterMode === "date" && filterDate) {
-        const target = formatDateForInput(filterDate);
-        return accumulator.day === target;
-      }
-
-      return true;
-    });
-  }, [accumulators, filterDate, filterDateRange, filterMode]);
+        return matchesDateFilter(accumulator.day, filterMode, filterDate, filterDateRange);
+      }),
+    [accumulators, filterDate, filterDateRange, filterMode]
+  );
 
   const resolvedActiveAccumulatorId = filteredActiveAccumulators.some(
     (accumulator) => accumulator.id === activeAccumulatorId
@@ -567,45 +486,15 @@ export function BetsCalculatorTable() {
     };
   });
 
-  const filteredAccumulatorSummaries = useMemo(() => {
-    if (filterMode === "date" && !filterDate) {
-      return accumulatorSummaries;
-    }
-
-    if (filterMode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
-      return accumulatorSummaries;
-    }
-
-    return accumulatorSummaries.filter((summary) => {
-      if (!summary.day) {
-        return false;
-      }
-
-      const summaryDate = parseStoredDate(summary.day);
-      if (!summaryDate) {
-        return false;
-      }
-
-      if (filterMode === "range" && (filterDateRange?.from || filterDateRange?.to)) {
-        const from = filterDateRange?.from ? startOfDay(filterDateRange.from) : null;
-        const to = filterDateRange?.to ? endOfDay(filterDateRange.to) : from;
-        if (from && summaryDate < from) {
-          return false;
-        }
-        if (to && summaryDate > to) {
-          return false;
-        }
-        return true;
-      }
-
-      if (filterMode === "date" && filterDate) {
-        const target = formatDateForInput(filterDate);
-        return summary.day === target;
-      }
-
-      return true;
-    });
-  }, [accumulatorSummaries, filterDate, filterDateRange, filterMode]);
+  const filteredAccumulatorSummaries = useMemo(
+    () =>
+      accumulatorSummaries.filter(
+        (summary) =>
+          Boolean(summary.day) &&
+          matchesDateFilter(String(summary.day), filterMode, filterDate, filterDateRange)
+      ),
+    [accumulatorSummaries, filterDate, filterDateRange, filterMode]
+  );
 
   function renderSortIcon(sortState: false | "asc" | "desc") {
     if (sortState === "asc") {

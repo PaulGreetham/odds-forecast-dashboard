@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 
 import { isFirebaseConfigured } from "@/lib/firebase";
-import { formatDateDisplay, formatDateForInput, parseDateKey } from "@/lib/date-utils";
+import { formatDateDisplay, formatDateForInput, matchesDateFilter } from "@/lib/date-utils";
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { useBetsState } from "@/hooks/firebase/use-bets-state";
 import { useMatches } from "@/hooks/firebase/use-matches";
@@ -193,47 +193,13 @@ export function AnalyticsTablesView() {
     });
   }, [betsState, matches]);
 
-  const dateFilteredRows = useMemo(() => {
-    if (filterMode === "date" && !filterDate) {
-      return tableRows;
-    }
-    if (filterMode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
-      return tableRows;
-    }
-
-    return tableRows.filter((row) => {
-      const rowDate = parseDateKey(row.date);
-      if (!rowDate) {
-        return false;
-      }
-
-      if (filterMode === "date" && filterDate) {
-        return row.date === formatDateForInput(filterDate);
-      }
-
-      if (filterMode === "range" && (filterDateRange?.from || filterDateRange?.to)) {
-        const from = filterDateRange?.from
-          ? new Date(
-              filterDateRange.from.getFullYear(),
-              filterDateRange.from.getMonth(),
-              filterDateRange.from.getDate()
-            )
-          : null;
-        const toRaw = filterDateRange?.to ?? filterDateRange?.from ?? null;
-        const to = toRaw
-          ? new Date(toRaw.getFullYear(), toRaw.getMonth(), toRaw.getDate(), 23, 59, 59, 999)
-          : null;
-        if (from && rowDate < from) {
-          return false;
-        }
-        if (to && rowDate > to) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }, [filterDate, filterDateRange, filterMode, tableRows]);
+  const dateFilteredRows = useMemo(
+    () =>
+      tableRows.filter((row) =>
+        matchesDateFilter(row.date, filterMode, filterDate, filterDateRange)
+      ),
+    [filterDate, filterDateRange, filterMode, tableRows]
+  );
 
   const accumulatorRows = useMemo<AccumulatorAnalyticsRow[]>(() => {
     const matchesById = new Map(matches.map((row) => [row.id, row]));
@@ -271,50 +237,15 @@ export function AnalyticsTablesView() {
     });
   }, [betsState.accumulators, matches]);
 
-  const dateFilteredAccumulatorRows = useMemo(() => {
-    if (filterMode === "date" && !filterDate) {
-      return accumulatorRows;
-    }
-    if (filterMode === "range" && !filterDateRange?.from && !filterDateRange?.to) {
-      return accumulatorRows;
-    }
-
-    return accumulatorRows.filter((row) => {
-      if (!row.day) {
-        return false;
-      }
-      const rowDate = parseDateKey(row.day);
-      if (!rowDate) {
-        return false;
-      }
-
-      if (filterMode === "date" && filterDate) {
-        return row.day === formatDateForInput(filterDate);
-      }
-
-      if (filterMode === "range" && (filterDateRange?.from || filterDateRange?.to)) {
-        const from = filterDateRange?.from
-          ? new Date(
-              filterDateRange.from.getFullYear(),
-              filterDateRange.from.getMonth(),
-              filterDateRange.from.getDate()
-            )
-          : null;
-        const toRaw = filterDateRange?.to ?? filterDateRange?.from ?? null;
-        const to = toRaw
-          ? new Date(toRaw.getFullYear(), toRaw.getMonth(), toRaw.getDate(), 23, 59, 59, 999)
-          : null;
-        if (from && rowDate < from) {
-          return false;
-        }
-        if (to && rowDate > to) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }, [accumulatorRows, filterDate, filterDateRange, filterMode]);
+  const dateFilteredAccumulatorRows = useMemo(
+    () =>
+      accumulatorRows.filter(
+        (row) =>
+          Boolean(row.day) &&
+          matchesDateFilter(String(row.day), filterMode, filterDate, filterDateRange)
+      ),
+    [accumulatorRows, filterDate, filterDateRange, filterMode]
+  );
 
   function sortHeader(
     label: string,
