@@ -14,9 +14,7 @@ import {
 } from "@tanstack/react-table";
 import type { DateRange } from "react-day-picker";
 import {
-  CalendarIcon,
   Settings2Icon,
-  XIcon,
 } from "lucide-react";
 
 import { isFirebaseConfigured } from "@/lib/firebase";
@@ -26,8 +24,8 @@ import { useBetsState } from "@/hooks/firebase/use-bets-state";
 import { useMatches } from "@/hooks/firebase/use-matches";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateFilterToolbar } from "@/components/ui/date-filter-toolbar";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -36,10 +34,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
 import { TablePaginationFooter } from "@/components/ui/table-pagination-footer";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AnalyticsAccumulatorTable } from "@/components/analytics-accumulator-table";
 import type { MatchInputRow } from "@/types/domain/match";
@@ -344,72 +340,19 @@ export function AnalyticsTablesView() {
         <CardDescription>Comprehensive game outcomes and betting performance.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Filter Mode</Label>
-            <div className="inline-flex rounded-md border p-1">
-              <Button type="button" size="sm" variant={filterMode === "date" ? "default" : "ghost"} onClick={() => setFilterMode("date")}>Date</Button>
-              <Button type="button" size="sm" variant={filterMode === "range" ? "default" : "ghost"} onClick={() => setFilterMode("range")}>Range</Button>
-            </div>
-          </div>
-
-          {filterMode === "date" ? (
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Date</Label>
-              <Popover>
-                <PopoverTrigger
-                  render={
-                    <Button type="button" variant="outline" className="w-[180px] justify-start font-normal">
-                      <CalendarIcon className="size-4" />
-                      {filterDate ? formatDateDisplay(formatDateForInput(filterDate)) : "Pick date"}
-                    </Button>
-                  }
-                />
-                <PopoverContent align="start" className="w-auto p-0" initialFocus={false}>
-                  <Calendar mode="single" selected={filterDate} onSelect={(date) => setFilterDate(date ?? undefined)} />
-                </PopoverContent>
-              </Popover>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Date Range</Label>
-              <Popover modal={false}>
-                <PopoverTrigger
-                  render={
-                    <Button type="button" variant="outline" className="w-[260px] justify-start font-normal">
-                      <CalendarIcon className="size-4" />
-                      {filterDateRange?.from
-                        ? filterDateRange.to
-                          ? `${formatDateDisplay(formatDateForInput(filterDateRange.from))} - ${formatDateDisplay(formatDateForInput(filterDateRange.to))}`
-                          : formatDateDisplay(formatDateForInput(filterDateRange.from))
-                        : "Pick date range"}
-                    </Button>
-                  }
-                />
-                <PopoverContent
-                  align="start"
-                  className="w-auto p-0"
-                  initialFocus={false}
-                >
-                  <Calendar mode="range" selected={filterDateRange} onSelect={setFilterDateRange} numberOfMonths={2} />
-                </PopoverContent>
-              </Popover>
-            </div>
-          )}
-
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            onClick={() => {
-              setFilterDate(undefined);
-              setFilterDateRange(undefined);
-            }}
-          >
-            <XIcon className="size-4" />
-            <span className="sr-only">Clear date filters</span>
-          </Button>
-        </div>
+        <DateFilterToolbar
+          filterMode={filterMode}
+          onFilterModeChange={setFilterMode}
+          filterDate={filterDate}
+          onFilterDateChange={setFilterDate}
+          filterDateRange={filterDateRange}
+          onFilterDateRangeChange={setFilterDateRange}
+          onClear={() => {
+            setFilterDate(undefined);
+            setFilterDateRange(undefined);
+          }}
+          rangePopoverModal={false}
+        />
 
         <div className="flex items-center justify-between gap-2">
           <Input

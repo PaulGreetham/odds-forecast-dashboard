@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Calendar } from "@/components/ui/calendar";
+import { DateFilterToolbar } from "@/components/ui/date-filter-toolbar";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -57,7 +58,6 @@ import {
   CalendarIcon,
   PencilIcon,
   Settings2Icon,
-  XIcon,
 } from "lucide-react";
 import type { DateRange } from "react-day-picker";
 import type { MatchInputRow } from "@/types/domain/match";
@@ -708,103 +708,19 @@ export function MatchOddsFormTable() {
           <CardTitle>Match Data Table</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="mb-4 flex flex-wrap items-end gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Filter Mode</Label>
-              <div className="inline-flex rounded-md border p-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={filterMode === "date" ? "default" : "ghost"}
-                  onClick={() => setFilterMode("date")}
-                >
-                  Date
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={filterMode === "range" ? "default" : "ghost"}
-                  onClick={() => setFilterMode("range")}
-                >
-                  Range
-                </Button>
-              </div>
-            </div>
-            {filterMode === "date" ? (
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Date</Label>
-                <Popover>
-                  <PopoverTrigger
-                    render={
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className={cn(
-                          "w-[180px] justify-start font-normal",
-                          !filterDate && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="size-4" />
-                        {filterDate
-                          ? formatDateDisplay(formatDateForInput(filterDate))
-                          : "Pick date"}
-                      </Button>
-                    }
-                  />
-                  <PopoverContent align="start" className="w-auto p-0">
-                    <Calendar mode="single" selected={filterDate} onSelect={(date) => setFilterDate(date ?? undefined)} />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Date Range</Label>
-                <Popover>
-                  <PopoverTrigger
-                    render={
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className={cn(
-                          "w-[260px] justify-start font-normal",
-                          !filterDateRange?.from && !filterDateRange?.to && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="size-4" />
-                        {filterDateRange?.from
-                          ? filterDateRange.to
-                            ? `${formatDateDisplay(
-                                formatDateForInput(filterDateRange.from)
-                              )} - ${formatDateDisplay(formatDateForInput(filterDateRange.to))}`
-                            : formatDateDisplay(formatDateForInput(filterDateRange.from))
-                          : "Pick date range"}
-                      </Button>
-                    }
-                  />
-                  <PopoverContent align="start" className="w-auto p-0">
-                    <Calendar
-                      mode="range"
-                      selected={filterDateRange}
-                      onSelect={(range) => setFilterDateRange(range)}
-                      numberOfMonths={2}
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              onClick={() => {
-                setFilterDate(undefined);
-                setFilterDateRange(undefined);
-              }}
-            >
-              <XIcon className="size-4" />
-              <span className="sr-only">Clear date filters</span>
-            </Button>
-          </div>
+          <DateFilterToolbar
+            filterMode={filterMode}
+            onFilterModeChange={setFilterMode}
+            filterDate={filterDate}
+            onFilterDateChange={setFilterDate}
+            filterDateRange={filterDateRange}
+            onFilterDateRangeChange={setFilterDateRange}
+            onClear={() => {
+              setFilterDate(undefined);
+              setFilterDateRange(undefined);
+            }}
+            className="mb-4"
+          />
           <div className="mb-4 flex items-center justify-between gap-2">
             <Input
               placeholder="Filter rows..."
