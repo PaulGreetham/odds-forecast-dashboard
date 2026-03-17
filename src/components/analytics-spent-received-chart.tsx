@@ -45,6 +45,21 @@ type MatchAnalyticsRow = Pick<MatchBase, "id" | "date" | "odds" | "winnerSide"> 
   actualWinnerSide: "home" | "away" | "draw" | null;
 };
 
+type AccumulatorAnalyticsInput = {
+  stake: string;
+  matchIds: string[];
+  day: string | null;
+};
+
+type ExtendedMetrics = {
+  averageProfitPerBet: number;
+  dailyReturnAverage: number;
+  bestDailyReturn: number;
+  worstDailyReturn: number;
+  totalBets: number;
+  bettingDays: number;
+};
+
 type MetricsRangeMode = "7d" | "30d" | "90d" | "180d" | "365d" | "all";
 type ChartViewMode = "daily" | "weekly" | "monthly" | "quarterly";
 
@@ -170,13 +185,6 @@ function PercentTicker({ value }: { value: number }) {
   );
 }
 
-function filterChartRowsByBounds(rows: ChartRow[], start: Date, end: Date) {
-  return rows.filter((row) => {
-    const date = parseDateKey(row.date);
-    return Boolean(date && date >= start && date <= end);
-  });
-}
-
 function summarizeMetrics(chartRows: ChartRow[], matches: MatchAnalyticsRow[]): MetricsSummary {
   const totals = chartRows.reduce(
     (acc, row) => {
@@ -200,6 +208,78 @@ function summarizeMetrics(chartRows: ChartRow[], matches: MatchAnalyticsRow[]): 
     wins,
     decided: decided.length,
     successPercent,
+  };
+}
+
+function deriveExtendedMetrics({
+  metricData,
+  bettingDayRows,
+  rows,
+  rowStakes,
+  defaultStake,
+  accumulators,
+  summaryProfit,
+}: {
+  metricData: ChartRow[];
+  bettingDayRows: ChartRow[];
+  rows: MatchAnalyticsRow[];
+  rowStakes: Record<string, string>;
+  defaultStake: string;
+  accumulators: AccumulatorAnalyticsInput[];
+  summaryProfit: number;
+}): ExtendedMetrics {
+  const metricDateKeys = new Set(metricData.map((row) => row.date));
+  const matchesById = new Map(rows.map((row) => [row.id, row]));
+
+  const singlesCount = rows.reduce((count, row) => {
+    if (!metricDateKeys.has(row.date)) {
+      return count;
+    }
+    const stakeValue = Number(
+      rowStakes[row.id] && rowStakes[row.id] !== "" ? rowStakes[row.id] : defaultStake
+    );
+    return Number.isFinite(stakeValue) && stakeValue > 0 ? count + 1 : count;
+  }, 0);
+
+  const accumulatorsCount = accumulators.reduce((count, accumulator) => {
+    if (!accumulator.matchIds.length) {
+      return count;
+    }
+    const stakeValue = Number(accumulator.stake);
+    if (!Number.isFinite(stakeValue) || stakeValue <= 0) {
+      return count;
+    }
+    const accumulatorMatches = accumulator.matchIds
+      .map((id) => matchesById.get(id))
+      .filter((match): match is MatchAnalyticsRow => Boolean(match));
+    if (!accumulatorMatches.length) {
+      return count;
+    }
+    const day = accumulator.day ?? accumulatorMatches[0].date;
+    if (!day || !metricDateKeys.has(day)) {
+      return count;
+    }
+    return count + 1;
+  }, 0);
+
+  const totalBets = singlesCount + accumulatorsCount;
+  const averageProfitPerBet = totalBets > 0 ? summaryProfit / totalBets : 0;
+
+  const dailyReturns = bettingDayRows.map((row) => ((row.received - row.spent) / row.spent) * 100);
+  const dailyReturnAverage =
+    dailyReturns.length > 0
+      ? dailyReturns.reduce((sum, value) => sum + value, 0) / dailyReturns.length
+      : 0;
+  const bestDailyReturn = dailyReturns.length > 0 ? Math.max(...dailyReturns) : 0;
+  const worstDailyReturn = dailyReturns.length > 0 ? Math.min(...dailyReturns) : 0;
+
+  return {
+    averageProfitPerBet,
+    dailyReturnAverage,
+    bestDailyReturn,
+    worstDailyReturn,
+    totalBets,
+    bettingDays: bettingDayRows.length,
   };
 }
 
@@ -387,74 +467,27 @@ export function AnalyticsSpentReceivedChart() {
   }, [chartData, chartViewMode]);
 
   const topSummary = useMemo(() => summarizeMetrics(metricData, rows), [metricData, rows]);
-  const topExtendedMetrics = useMemo(() => {
-    const metricDateKeys = new Set(metricData.map((row) => row.date));
-    const matchesById = new Map(rows.map((row) => [row.id, row]));
-
-    const singlesCount = rows.reduce((count, row) => {
-      if (!metricDateKeys.has(row.date)) {
-        return count;
-      }
-      const stakeValue = Number(
-        betsState.rowStakes[row.id] && betsState.rowStakes[row.id] !== ""
-          ? betsState.rowStakes[row.id]
-          : betsState.defaultStake
-      );
-      return Number.isFinite(stakeValue) && stakeValue > 0 ? count + 1 : count;
-    }, 0);
-
-    const accumulatorsCount = betsState.accumulators.reduce((count, accumulator) => {
-      if (!accumulator.matchIds.length) {
-        return count;
-      }
-      const stakeValue = Number(accumulator.stake);
-      if (!Number.isFinite(stakeValue) || stakeValue <= 0) {
-        return count;
-      }
-      const accumulatorMatches = accumulator.matchIds
-        .map((id) => matchesById.get(id))
-        .filter((match): match is MatchAnalyticsRow => Boolean(match));
-      if (!accumulatorMatches.length) {
-        return count;
-      }
-      const day = accumulator.day ?? accumulatorMatches[0].date;
-      if (!day || !metricDateKeys.has(day)) {
-        return count;
-      }
-      return count + 1;
-    }, 0);
-
-    const totalBets = singlesCount + accumulatorsCount;
-    const averageProfitPerBet = totalBets > 0 ? topSummary.profit / totalBets : 0;
-
-    const dailyReturns = bettingDayRows.map(
-      (row) => ((row.received - row.spent) / row.spent) * 100
-    );
-
-    const dailyReturnAverage =
-      dailyReturns.length > 0
-        ? dailyReturns.reduce((sum, value) => sum + value, 0) / dailyReturns.length
-        : 0;
-    const bestDailyReturn = dailyReturns.length > 0 ? Math.max(...dailyReturns) : 0;
-    const worstDailyReturn = dailyReturns.length > 0 ? Math.min(...dailyReturns) : 0;
-
-    return {
-      averageProfitPerBet,
-      dailyReturnAverage,
-      bestDailyReturn,
-      worstDailyReturn,
-      totalBets,
-      bettingDays: bettingDayRows.length,
-    };
-  }, [
-    betsState.accumulators,
-    betsState.defaultStake,
-    betsState.rowStakes,
-    bettingDayRows,
-    metricData,
-    rows,
-    topSummary.profit,
-  ]);
+  const topExtendedMetrics = useMemo(
+    () =>
+      deriveExtendedMetrics({
+        metricData,
+        bettingDayRows,
+        rows,
+        rowStakes: betsState.rowStakes,
+        defaultStake: betsState.defaultStake,
+        accumulators: betsState.accumulators,
+        summaryProfit: topSummary.profit,
+      }),
+    [
+      betsState.accumulators,
+      betsState.defaultStake,
+      betsState.rowStakes,
+      bettingDayRows,
+      metricData,
+      rows,
+      topSummary.profit,
+    ]
+  );
 
   const previousChartData = useMemo(() => {
     if (!chartData.length) {
@@ -494,66 +527,27 @@ export function AnalyticsSpentReceivedChart() {
     [previousMetricData, rows]
   );
 
-  const previousExtendedMetrics = useMemo(() => {
-    const metricDateKeys = new Set(previousMetricData.map((row) => row.date));
-    const matchesById = new Map(rows.map((row) => [row.id, row]));
-
-    const singlesCount = rows.reduce((count, row) => {
-      if (!metricDateKeys.has(row.date)) {
-        return count;
-      }
-      const stakeValue = Number(
-        betsState.rowStakes[row.id] && betsState.rowStakes[row.id] !== ""
-          ? betsState.rowStakes[row.id]
-          : betsState.defaultStake
-      );
-      return Number.isFinite(stakeValue) && stakeValue > 0 ? count + 1 : count;
-    }, 0);
-
-    const accumulatorsCount = betsState.accumulators.reduce((count, accumulator) => {
-      if (!accumulator.matchIds.length) {
-        return count;
-      }
-      const stakeValue = Number(accumulator.stake);
-      if (!Number.isFinite(stakeValue) || stakeValue <= 0) {
-        return count;
-      }
-      const accumulatorMatches = accumulator.matchIds
-        .map((id) => matchesById.get(id))
-        .filter((match): match is MatchAnalyticsRow => Boolean(match));
-      if (!accumulatorMatches.length) {
-        return count;
-      }
-      const day = accumulator.day ?? accumulatorMatches[0].date;
-      if (!day || !metricDateKeys.has(day)) {
-        return count;
-      }
-      return count + 1;
-    }, 0);
-
-    const totalBets = singlesCount + accumulatorsCount;
-    const averageProfitPerBet = totalBets > 0 ? previousSummary.profit / totalBets : 0;
-
-    const dailyReturns = previousBettingDayRows.map(
-      (row) => ((row.received - row.spent) / row.spent) * 100
-    );
-    const bestDailyReturn = dailyReturns.length > 0 ? Math.max(...dailyReturns) : 0;
-    const worstDailyReturn = dailyReturns.length > 0 ? Math.min(...dailyReturns) : 0;
-
-    return {
-      averageProfitPerBet,
-      bestDailyReturn,
-      worstDailyReturn,
-    };
-  }, [
-    betsState.accumulators,
-    betsState.defaultStake,
-    betsState.rowStakes,
-    previousBettingDayRows,
-    previousMetricData,
-    previousSummary.profit,
-    rows,
-  ]);
+  const previousExtendedMetrics = useMemo(
+    () =>
+      deriveExtendedMetrics({
+        metricData: previousMetricData,
+        bettingDayRows: previousBettingDayRows,
+        rows,
+        rowStakes: betsState.rowStakes,
+        defaultStake: betsState.defaultStake,
+        accumulators: betsState.accumulators,
+        summaryProfit: previousSummary.profit,
+      }),
+    [
+      betsState.accumulators,
+      betsState.defaultStake,
+      betsState.rowStakes,
+      previousBettingDayRows,
+      previousMetricData,
+      previousSummary.profit,
+      rows,
+    ]
+  );
 
   const currentReturnPercent =
     topSummary.spent > 0 ? ((topSummary.received - topSummary.spent) / topSummary.spent) * 100 : 0;
