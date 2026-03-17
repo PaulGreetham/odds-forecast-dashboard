@@ -19,6 +19,7 @@ import {
 
 import { isFirebaseConfigured } from "@/lib/firebase";
 import { formatDateDisplay, formatDateForInput, matchesDateFilter } from "@/lib/date-utils";
+import { formatEuro } from "@/lib/number-format";
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { useBetsState } from "@/hooks/firebase/use-bets-state";
 import { useMatches } from "@/hooks/firebase/use-matches";
@@ -45,10 +46,6 @@ import type { DateFilterMode } from "@/types/filters";
 type MatchRow = MatchInputRow & {
   actualWinnerSide: "home" | "away" | "draw" | null;
 };
-
-function formatCurrency(value: number) {
-  return `€${value.toFixed(2)}`;
-}
 
 export function AnalyticsTablesView() {
   const uid = useAuthUid();
@@ -275,12 +272,12 @@ export function AnalyticsTablesView() {
     {
       accessorKey: "stake",
       header: ({ column }) => sortHeader("Stake", column),
-      cell: ({ row }) => formatCurrency(row.original.stake),
+      cell: ({ row }) => formatEuro(row.original.stake),
     },
     {
       accessorKey: "return",
       header: ({ column }) => sortHeader("Return", column),
-      cell: ({ row }) => formatCurrency(row.original.return),
+      cell: ({ row }) => formatEuro(row.original.return),
     },
     {
       accessorKey: "profit",
@@ -293,7 +290,7 @@ export function AnalyticsTablesView() {
               : "text-red-600 dark:text-red-400"
           )}
         >
-          {formatCurrency(row.original.profit)}
+          {formatEuro(row.original.profit)}
         </span>
       ),
     },

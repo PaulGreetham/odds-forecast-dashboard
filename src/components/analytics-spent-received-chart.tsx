@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { formatDateDisplay, parseDateKey, toDateKey } from "@/lib/date-utils";
+import { formatEuroSigned } from "@/lib/number-format";
 import type { MatchBase } from "@/types/domain/match";
 import type { ChartRow, MetricsSummary } from "@/types/analytics";
 
@@ -146,11 +147,6 @@ function formatBucketTooltip(value: string, viewMode: ChartViewMode) {
   }
   const quarter = Math.floor(start.getMonth() / 3) + 1;
   return `Q${quarter} ${start.getFullYear()}`;
-}
-
-function formatCurrency(value: number) {
-  const sign = value < 0 ? "-" : "";
-  return `${sign}€${Math.abs(value).toFixed(2)}`;
 }
 
 function calculatePercentChange(current: number, previous: number) {
@@ -852,7 +848,7 @@ export function AnalyticsSpentReceivedChart() {
                               <span
                                 className={`font-mono font-medium tabular-nums ${colorClass}`}
                               >
-                                {formatCurrency(profit)}
+                                {formatEuroSigned(profit)}
                               </span>
                             </div>
                             <div className="flex items-center justify-between gap-2">

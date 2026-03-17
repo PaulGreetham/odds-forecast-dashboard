@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { formatDateDisplay, parseDateKey, toDateKey } from "@/lib/date-utils";
+import { formatEuroSigned } from "@/lib/number-format";
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { useBetsState } from "@/hooks/firebase/use-bets-state";
 import { useMatches } from "@/hooks/firebase/use-matches";
@@ -49,11 +50,6 @@ function formatDateTick(value: string) {
     return value;
   }
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function formatCurrency(value: number) {
-  const sign = value < 0 ? "-" : "";
-  return `${sign}€${Math.abs(value).toFixed(2)}`;
 }
 
 export function AnalyticsTotalProfitAreaChart() {
@@ -244,7 +240,7 @@ export function AnalyticsTotalProfitAreaChart() {
         <div className="grid flex-1 gap-1">
           <CardTitle>Total Profit - Interactive Area</CardTitle>
           <CardDescription>
-            Total profit trend for the selected period ({formatCurrency(totalProfit)}).
+            Total profit trend for the selected period ({formatEuroSigned(totalProfit)}).
           </CardDescription>
         </div>
         <DropdownMenu>
@@ -307,14 +303,14 @@ export function AnalyticsTotalProfitAreaChart() {
                 axisLine={false}
                 width={90}
                 domain={yDomain}
-                tickFormatter={(value) => formatCurrency(Number(value))}
+                tickFormatter={(value) => formatEuroSigned(Number(value))}
               />
               <ChartTooltip
                 cursor={false}
                 content={
                   <ChartTooltipContent
                     labelFormatter={(value) => formatDateDisplay(String(value))}
-                    formatter={(value) => formatCurrency(Number(value ?? 0))}
+                    formatter={(value) => formatEuroSigned(Number(value ?? 0))}
                   />
                 }
               />

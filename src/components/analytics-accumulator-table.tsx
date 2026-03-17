@@ -12,13 +12,10 @@ import {
 
 import type { AccumulatorAnalyticsRow } from "@/types/analytics";
 import { formatDateDisplay } from "@/lib/date-utils";
+import { formatEuro } from "@/lib/number-format";
 import { cn } from "@/lib/utils";
 import { SortableHeaderButton } from "@/components/ui/sortable-header-button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-
-function formatCurrency(value: number) {
-  return `€${value.toFixed(2)}`;
-}
 
 export function AnalyticsAccumulatorTable({ rows }: { rows: AccumulatorAnalyticsRow[] }) {
   const [sorting, setSorting] = useState<SortingState>([{ id: "day", desc: true }]);
@@ -50,12 +47,12 @@ export function AnalyticsAccumulatorTable({ rows }: { rows: AccumulatorAnalytics
     {
       accessorKey: "stake",
       header: ({ column }) => sortHeader("Stake", column),
-      cell: ({ row }) => formatCurrency(row.original.stake),
+      cell: ({ row }) => formatEuro(row.original.stake),
     },
     {
       accessorKey: "return",
       header: ({ column }) => sortHeader("Return", column),
-      cell: ({ row }) => formatCurrency(row.original.return),
+      cell: ({ row }) => formatEuro(row.original.return),
     },
     {
       accessorKey: "profit",
@@ -68,7 +65,7 @@ export function AnalyticsAccumulatorTable({ rows }: { rows: AccumulatorAnalytics
               : "text-red-600 dark:text-red-400"
           )}
         >
-          {formatCurrency(row.original.profit)}
+          {formatEuro(row.original.profit)}
         </span>
       ),
     },
