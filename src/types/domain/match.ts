@@ -24,3 +24,5 @@ export type MatchResultRow = Pick<
   actualWinnerSide: ActualWinnerSide;
 };
 
+export type MatchFormValues = Omit<MatchInputRow, "id">;
+

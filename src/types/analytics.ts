@@ -48,3 +48,20 @@ export type AccumulatorAnalyticsRow = {
   profit: number;
 };
 
+export type ChartViewMode = "daily" | "weekly" | "monthly" | "quarterly";
+
+export type AccumulatorAnalyticsInput = {
+  stake: string;
+  matchIds: string[];
+  day: string | null;
+};
+
+export type ExtendedMetrics = {
+  averageProfitPerBet: number;
+  dailyReturnAverage: number;
+  bestDailyReturn: number;
+  worstDailyReturn: number;
+  totalBets: number;
+  bettingDays: number;
+};
+

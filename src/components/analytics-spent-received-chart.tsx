@@ -46,24 +46,13 @@ import {
 import { aggregateDailySpentReceived } from "@/lib/analytics-aggregation";
 import { buildDailySeriesInRange } from "@/lib/analytics-series";
 import { formatEuroSigned } from "@/lib/number-format";
-import type { ChartRow, MetricsSummary } from "@/types/analytics";
-
-type AccumulatorAnalyticsInput = {
-  stake: string;
-  matchIds: string[];
-  day: string | null;
-};
-
-type ExtendedMetrics = {
-  averageProfitPerBet: number;
-  dailyReturnAverage: number;
-  bestDailyReturn: number;
-  worstDailyReturn: number;
-  totalBets: number;
-  bettingDays: number;
-};
-
-type ChartViewMode = "daily" | "weekly" | "monthly" | "quarterly";
+import type {
+  AccumulatorAnalyticsInput,
+  ChartRow,
+  ChartViewMode,
+  ExtendedMetrics,
+  MetricsSummary,
+} from "@/types/analytics";
 
 const chartConfig = {
   spent: {

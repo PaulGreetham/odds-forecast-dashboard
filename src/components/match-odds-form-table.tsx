@@ -57,13 +57,9 @@ import {
   Settings2Icon,
 } from "lucide-react";
 import type { DateRange } from "react-day-picker";
-import type { MatchInputRow } from "@/types/domain/match";
+import type { MatchFormValues, MatchInputRow } from "@/types/domain/match";
 import type { DateFilterMode } from "@/types/filters";
 import { formatDateDisplay, formatDateForInput, matchesDateFilter } from "@/lib/date-utils";
-
-type MatchRow = MatchInputRow;
-
-type MatchFormValues = Omit<MatchRow, "id">;
 
 const initialForm: MatchFormValues = {
   date: "",
@@ -92,7 +88,7 @@ export function MatchOddsFormTable() {
   const [filterMode, setFilterMode] = useState<DateFilterMode>("date");
 
   const matchesCollection = useMatchesCollection(uid);
-  const { rows, error: matchesError } = useMatches<MatchRow>(
+  const { rows, error: matchesError } = useMatches<MatchInputRow>(
     uid,
     mapMatchInputRow,
     "createdAt",
@@ -142,7 +138,7 @@ export function MatchOddsFormTable() {
     }
   }
 
-  function handleEdit(row: MatchRow) {
+  function handleEdit(row: MatchInputRow) {
     setEditingId(row.id);
     setForm({
       date: row.date,
@@ -180,7 +176,7 @@ export function MatchOddsFormTable() {
     setForm(initialForm);
   }
 
-  function getPredictedWinner(row: MatchRow) {
+  function getPredictedWinner(row: MatchInputRow) {
     return row.winnerSide === "away"
       ? row.awayTeam || "Away Team"
       : row.homeTeam || "Home Team";
@@ -194,7 +190,7 @@ export function MatchOddsFormTable() {
     [filterDate, filterDateRange, filterMode, rows]
   );
 
-  const columns: ColumnDef<MatchRow>[] = [
+  const columns: ColumnDef<MatchInputRow>[] = [
     {
       accessorKey: "date",
       header: ({ column }) => <SortableHeaderButton label="Date" column={column} />,

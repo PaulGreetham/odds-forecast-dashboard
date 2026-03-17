@@ -50,7 +50,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { AccumulatorLike } from "@/types/domain/bets";
+import type { DailyAccumulator } from "@/types/domain/bets";
 import type { MatchBase } from "@/types/domain/match";
 import type { DateFilterMode } from "@/types/filters";
 import {
@@ -60,9 +60,6 @@ import {
   reconcileAccumulatorsWithRows,
   serializeBetsState,
 } from "@/components/bets/bets-utils";
-
-type MatchBet = MatchBase;
-type DailyAccumulator = AccumulatorLike & { note: string };
 
 const initialAccumulator: DailyAccumulator = {
   id: "acc-1",
@@ -89,7 +86,7 @@ export function BetsCalculatorTable() {
   const [openNotePopoverId, setOpenNotePopoverId] = useState<string | null>(null);
   const [isBetsStateHydrated, setIsBetsStateHydrated] = useState(false);
   const lastSavedStateRef = useRef<string>("");
-  const { rows, error: matchesError } = useMatches<MatchBet>(
+  const { rows, error: matchesError } = useMatches<MatchBase>(
     uid,
     mapMatchInputRow,
     "createdAt",
@@ -333,14 +330,14 @@ export function BetsCalculatorTable() {
     }));
   }
 
-  function canToggleMatchForAccumulator(accumulator: DailyAccumulator, row: MatchBet) {
+  function canToggleMatchForAccumulator(accumulator: DailyAccumulator, row: MatchBase) {
     if (accumulator.matchIds.includes(row.id)) {
       return true;
     }
     return !accumulator.day || accumulator.day === row.date;
   }
 
-  function toggleMatchForAccumulator(accumulatorId: string, row: MatchBet) {
+  function toggleMatchForAccumulator(accumulatorId: string, row: MatchBase) {
     setAccumulatorError(null);
     setAccumulators((prev) =>
       prev.map((accumulator) => {
@@ -438,7 +435,7 @@ export function BetsCalculatorTable() {
     return <SortableHeaderButton label={label} column={column} />;
   }
 
-  const betColumns: ColumnDef<MatchBet>[] = [
+  const betColumns: ColumnDef<MatchBase>[] = [
     {
       accessorKey: "date",
       header: ({ column }) => sortableHeader("Date", column),

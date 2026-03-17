@@ -14,3 +14,5 @@ export type BetsState = {
   activeAccumulatorId?: string;
 };
 
+export type DailyAccumulator = AccumulatorLike & { note: string };
+
