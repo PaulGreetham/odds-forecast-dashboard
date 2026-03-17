@@ -2,7 +2,7 @@ import { parseDateKey } from "@/lib/date-utils";
 import type { AccumulatorLike } from "@/types/domain/bets";
 import type { MatchBase } from "@/types/domain/match";
 
-export function formatAccumulatorDateLabel(dayKey: string) {
+function formatAccumulatorDateLabel(dayKey: string) {
   const parsed = parseDateKey(dayKey) ?? new Date(dayKey);
   if (Number.isNaN(parsed.getTime())) {
     return dayKey;

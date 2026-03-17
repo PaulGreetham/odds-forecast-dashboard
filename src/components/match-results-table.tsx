@@ -36,7 +36,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { MatchResultRow } from "@/types/domain/match";
 import type { DateFilterMode } from "@/types/filters";
-import { formatDateDisplay, formatDateForInput, matchesDateFilter } from "@/lib/date-utils";
+import { formatDateDisplay, matchesDateFilter } from "@/lib/date-utils";
 
 export function MatchResultsTable() {
   const uid = useAuthUid();

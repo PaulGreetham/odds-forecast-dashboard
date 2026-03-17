@@ -10,7 +10,7 @@ type OutcomeMatchRow = {
   actualWinnerSide: ActualWinnerSide;
 };
 
-export type DailySpentReceivedRow = {
+type DailySpentReceivedRow = {
   date: string;
   spent: number;
   received: number;

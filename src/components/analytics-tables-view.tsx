@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 import { isFirebaseConfigured } from "@/lib/firebase";
-import { formatDateDisplay, formatDateForInput, matchesDateFilter } from "@/lib/date-utils";
+import { formatDateDisplay, matchesDateFilter } from "@/lib/date-utils";
 import { formatEuro } from "@/lib/number-format";
 import { useAuthUid } from "@/hooks/firebase/use-auth-uid";
 import { useBetsState } from "@/hooks/firebase/use-bets-state";

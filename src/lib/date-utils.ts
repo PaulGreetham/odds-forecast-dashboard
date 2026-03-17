@@ -13,7 +13,7 @@ export function parseDateKey(value: string) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-export function parseStoredDate(value: string) {
+function parseStoredDate(value: string) {
   if (!value) {
     return null;
   }
@@ -56,11 +56,11 @@ export function formatDateDisplay(value: string) {
   });
 }
 
-export function startOfDay(value: Date) {
+function startOfDay(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate());
 }
 
-export function endOfDay(value: Date) {
+function endOfDay(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate(), 23, 59, 59, 999);
 }
 
